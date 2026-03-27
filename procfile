@@ -1,1 +1,1 @@
-web: gunicorn conanea_backend.wsgi
+web: gunicorn congress.wsgi
