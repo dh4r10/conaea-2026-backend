@@ -202,38 +202,38 @@ DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
 # -------------------------- DEVELOPMENT --------------------------
 
-# DATABASES = {
-#     'default': {
-#         'ENGINE': 'django.db.backends.postgresql',
-#         'NAME': os.getenv('DB_NAME'),
-#         'USER': os.getenv('DB_USER'),
-#         'PASSWORD': os.getenv('DB_PASSWORD'),
-#         'HOST': os.getenv('DB_HOST'),
-#         'PORT': os.getenv('DB_PORT') 
-#     }
-# }
+DATABASES = {
+    'default': {
+        'ENGINE': 'django.db.backends.postgresql',
+        'NAME': os.getenv('DB_NAME'),
+        'USER': os.getenv('DB_USER'),
+        'PASSWORD': os.getenv('DB_PASSWORD'),
+        'HOST': os.getenv('DB_HOST'),
+        'PORT': os.getenv('DB_PORT') 
+    }
+}
 
-# CORS_ALLOW_ALL_ORIGINS = True
+CORS_ALLOW_ALL_ORIGINS = True
 
 # -------------------------- PRODUCTION --------------------------
 
-DATABASES = {
-    'default': dj_database_url.config(default=os.getenv('DATABASE_URL'))
-}
+# DATABASES = {
+#     'default': dj_database_url.config(default=os.getenv('DATABASE_URL'))
+# }
 
-CORS_ALLOW_ALL_ORIGINS = False
+# CORS_ALLOW_ALL_ORIGINS = False
 
-CORS_ALLOW_CREDENTIALS = True
+# CORS_ALLOW_CREDENTIALS = True
 
-CORS_ALLOWED_ORIGINS = [
-    "https://conaea-2026-production.up.railway.app",
-    "https://conaea.com",
-]
+# CORS_ALLOWED_ORIGINS = [
+#     "https://conaea-2026-production.up.railway.app",
+#     "https://conaea.com",
+# ]
 
-CSRF_TRUSTED_ORIGINS = [
-    "https://conaea-2026-production.up.railway.app",
-    "https://conaea.com",
-]
+# CSRF_TRUSTED_ORIGINS = [
+#     "https://conaea-2026-production.up.railway.app",
+#     "https://conaea.com",
+# ]
 
-SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
-SECURE_SSL_REDIRECT = True
+# SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
+# SECURE_SSL_REDIRECT = True
