@@ -228,11 +228,13 @@ CORS_ALLOW_CREDENTIALS = True
 CORS_ALLOWED_ORIGINS = [
     "https://conaea-2026-production.up.railway.app",
     "https://conaea.com",
+    "https://sisgepo-conaea.netlify.app",
 ]
 
 CSRF_TRUSTED_ORIGINS = [
     "https://conaea-2026-production.up.railway.app",
     "https://conaea.com",
+    "https://sisgepo-conaea.netlify.app",
 ]
 
 SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')

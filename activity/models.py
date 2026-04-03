@@ -37,6 +37,7 @@ class Day(models.Model):
 
     class Meta:
         db_table = 'days'
+        ordering = ['date'] 
 
 
 class Speaker(models.Model):
@@ -101,7 +102,7 @@ class Activity(models.Model):
     )
     name = models.CharField(max_length=50)
     order = models.IntegerField()
-    start_date = models.DateTimeField()
+    start_date = models.TimeField()
     duration = models.IntegerField()
     location = models.CharField(max_length=50)
     capacity = models.IntegerField()

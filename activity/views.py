@@ -53,7 +53,8 @@ class ActivityViewSet(viewsets.ModelViewSet):
     permission_classes = [permissions.AllowAny]
 
     def get_serializer_class(self):
-        if self.action == 'retrieve':
+        # 👈 list y retrieve usan el serializer de detalle
+        if self.action in ('list', 'retrieve'):
             return ActivityDetailSerializer
         return ActivitySerializer
 
