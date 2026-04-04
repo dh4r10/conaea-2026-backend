@@ -28,7 +28,7 @@ class ActivityType(models.Model):
 
 
 class Day(models.Model):
-    date = models.DateTimeField()
+    date = models.DateField()
     title = models.CharField(max_length=50)
     is_active = models.BooleanField(default=True)
 

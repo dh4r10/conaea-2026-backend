@@ -9,7 +9,7 @@ class ActivityTypeSerializer(serializers.ModelSerializer):
 
 
 class DaySerializer(serializers.ModelSerializer):
-    date = serializers.DateTimeField(
+    date = serializers.DateField(
         required=False,
         allow_null=True,
         default=None
