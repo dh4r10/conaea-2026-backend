@@ -5,7 +5,7 @@ from rest_framework.parsers import MultiPartParser, FormParser
 from django.db import transaction as db_transaction
 from rest_framework.views import APIView
 from django.db.models import Sum
-from .models import PreSale, QuotaType, AvailableSlot, Registration, Transaction, Refund
+from .models import PreSale, QuotaType, AvailableSlot, Registration, Transaction, Refund, DynamicCode
 from participant.models import Participant
 from participant.models import Enrollment
 from .serializers import (
@@ -17,10 +17,20 @@ from .serializers import (
     RegistrationDetailSerializer,
     TransactionSerializer,
     TransactionDetailSerializer,
-    RefundSerializer
+    RefundSerializer,
+    DynamicCodeSerializer,
+    DynamicCodeDetailSerializer
 )
 from participant.serializers import ParticipantSerializer, ParticipantValidationSerializer
+from .pagination import StandardPagination
+import random
+import string
 
+
+def generate_dynamic_code():
+    letters = ''.join(random.choices(string.ascii_uppercase, k=3))
+    digits = ''.join(random.choices(string.digits, k=2))
+    return letters + digits
 
 class PreSaleViewSet(viewsets.ModelViewSet):
     queryset = PreSale.objects.filter(is_active=True)
@@ -159,6 +169,60 @@ class RefundViewSet(viewsets.ModelViewSet):
         if transaction_id:
             queryset = queryset.filter(transaction_id=transaction_id)
         return queryset
+    
+class DynamicCodeViewSet(viewsets.ModelViewSet):
+    permission_classes = [permissions.IsAuthenticated]
+    pagination_class = StandardPagination
+
+    def get_serializer_class(self):
+        if self.action in ('retrieve', 'list'):
+            return DynamicCodeDetailSerializer
+        return DynamicCodeSerializer
+
+    def get_queryset(self):
+        queryset = DynamicCode.objects.filter(is_active=True).select_related('quota_type')
+        status = self.request.query_params.get('status')
+        quota_type_id = self.request.query_params.get('quota_type_id')
+        if status:
+            queryset = queryset.filter(status=status)
+        if quota_type_id:
+            queryset = queryset.filter(quota_type_id=quota_type_id)
+        return queryset
+
+    @action(detail=False, methods=['post'], url_path='generate')
+    def generate(self, request):
+        """
+        Genera un código dinámico para el tipo de cuota "General"
+        POST /api/register/dynamic-code/generate/
+        """
+        try:
+            quota_type = QuotaType.objects.get(name='General', is_active=True)
+        except QuotaType.DoesNotExist:
+            return Response(
+                {'error': 'El tipo de cuota "General" no existe.'},
+                status=status.HTTP_404_NOT_FOUND
+            )
+
+        # Generar código único
+        max_attempts = 10
+        for _ in range(max_attempts):
+            code = generate_dynamic_code()
+            if not DynamicCode.objects.filter(code=code).exists():
+                break
+        else:
+            return Response(
+                {'error': 'No se pudo generar un código único. Intenta nuevamente.'},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+
+        dynamic_code = DynamicCode.objects.create(
+            quota_type=quota_type,
+            code=code,
+            status='Disponible',
+        )
+
+        serializer = DynamicCodeDetailSerializer(dynamic_code)
+        return Response(serializer.data, status=status.HTTP_201_CREATED)
     
 class InscriptionView(APIView):
     permission_classes = [permissions.AllowAny]

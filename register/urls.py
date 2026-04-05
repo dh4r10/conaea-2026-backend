@@ -7,6 +7,7 @@ from .views import (
     RegistrationViewSet,
     TransactionViewSet,
     RefundViewSet,
+    DynamicCodeViewSet
 )
 
 router = routers.DefaultRouter()
@@ -17,6 +18,7 @@ router.register('available-slot', AvailableSlotViewSet, basename='available_slot
 router.register('registration', RegistrationViewSet, basename='registration')
 router.register('transaction', TransactionViewSet, basename='transaction')
 router.register('refund', RefundViewSet, basename='refund')
+router.register('dynamic-code', DynamicCodeViewSet, basename='dynamic_code')
 
 urlpatterns = [
     path('register/', include(router.urls)),

@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from .models import PreSale, QuotaType, AvailableSlot, Registration, Transaction, Refund
+from .models import PreSale, QuotaType, AvailableSlot, Registration, Transaction, Refund, DynamicCode
 
 
 class PreSaleSerializer(serializers.ModelSerializer):
@@ -115,3 +115,16 @@ class RegistrationDetailSerializer(serializers.ModelSerializer):
             'pending': max(required - total_paid + total_refunded, 0),
             'overpaid': max(total_paid - total_refunded - required, 0)
         }
+    
+# serializers.py
+class DynamicCodeSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = DynamicCode
+        fields = '__all__'
+
+class DynamicCodeDetailSerializer(serializers.ModelSerializer):
+    quota_type = QuotaTypeSerializer(read_only=True)
+
+    class Meta:
+        model = DynamicCode
+        fields = '__all__'

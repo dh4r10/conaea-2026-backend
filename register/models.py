@@ -113,7 +113,9 @@ class DynamicCode(models.Model):
         db_column='quota_type_id'
     )
     code = models.CharField(max_length=5, unique=True)
-    status = models.CharField(max_length=20, default='available')
+    status = models.CharField(max_length=20, default='Disponible')
+    created_at = models.DateTimeField(auto_now_add=True, editable=False)
+    used_at = models.DateTimeField(null=True, blank=True)
     is_active = models.BooleanField(default=True)
 
     def __str__(self):
@@ -121,3 +123,4 @@ class DynamicCode(models.Model):
 
     class Meta:
         db_table = 'dynamic_codes'
+        ordering = ['-created_at']  # 🔥 orden descendente (más reciente primero)
