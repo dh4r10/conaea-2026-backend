@@ -5,7 +5,9 @@ from .views import (
     ParticipantViewSet,
     ParticipantSpecialConditionViewSet,
     EnrollmentViewSet,
-    ParticipantValidationView
+    ParticipantValidationView,
+    PartnerUniversityViewSet,
+    DelegateViewSet
 )
 
 router = routers.DefaultRouter()
@@ -14,6 +16,8 @@ router.register('special-condition', SpecialConditionViewSet, basename='special_
 router.register('participant', ParticipantViewSet, basename='participant')
 router.register('participant-special-condition', ParticipantSpecialConditionViewSet, basename='participant_special_condition')
 router.register('enrollment', EnrollmentViewSet, basename='enrollment')
+router.register('partner-universities', PartnerUniversityViewSet, basename='partner_university')
+router.register('delegates', DelegateViewSet, basename='delegate')
 
 urlpatterns = [
     path('participants/', include(router.urls)),

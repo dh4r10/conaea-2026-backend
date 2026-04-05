@@ -138,3 +138,38 @@ class ValidationViewSet(viewsets.ModelViewSet):
         if register_id:
             queryset = queryset.filter(register_id=register_id)
         return queryset
+
+class ChangePasswordView(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request):
+        current_password = request.data.get('current_password')
+        new_password = request.data.get('new_password')
+
+        if not current_password or not new_password:
+            return Response(
+                {'error': 'Contraseña actual y nueva son requeridas.'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        user = request.user
+
+        if not user.check_password(current_password):
+            return Response(
+                {'error': 'La contraseña actual es incorrecta.'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        if current_password == new_password:
+            return Response(
+                {'error': 'La nueva contraseña debe ser diferente a la actual.'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        user.set_password(new_password)
+        user.save()
+
+        return Response(
+            {'message': 'Contraseña actualizada correctamente.'},
+            status=status.HTTP_200_OK
+        )

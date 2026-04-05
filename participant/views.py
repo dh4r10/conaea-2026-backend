@@ -4,15 +4,19 @@ from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.parsers import MultiPartParser, FormParser
 
-from .models import SpecialCondition, Participant, ParticipantSpecialCondition, Enrollment
+from .models import SpecialCondition, Participant, ParticipantSpecialCondition, Enrollment, PartnerUniversity, Delegate
 from .serializers import (
     SpecialConditionSerializer,
     ParticipantSerializer,
     ParticipantDetailSerializer,
     ParticipantSpecialConditionSerializer,
     EnrollmentSerializer,
-    ParticipantValidationSerializer
+    ParticipantValidationSerializer,
+    PartnerUniversitySerializer,
+    PartnerUniversityDetailSerializer,
+    DelegateSerializer
 )
+from .pagination import StandardPagination
 
 class SpecialConditionViewSet(viewsets.ModelViewSet):
     queryset = SpecialCondition.objects.filter(is_active=True)
@@ -91,6 +95,48 @@ class EnrollmentViewSet(viewsets.ModelViewSet):
         participant_id = self.request.query_params.get('participant_id')
         if participant_id:
             queryset = queryset.filter(participant_id=participant_id)
+        return queryset
+    
+class PartnerUniversityViewSet(viewsets.ModelViewSet):
+    queryset = PartnerUniversity.objects.filter(is_active=True).select_related('quota_type')
+    permission_classes = [permissions.IsAuthenticated]
+    pagination_class = StandardPagination
+
+    def get_serializer_class(self):
+        if self.action in ('retrieve', 'list'):
+            return PartnerUniversityDetailSerializer
+        return PartnerUniversitySerializer
+
+    def get_queryset(self):  # 👈
+        queryset = PartnerUniversity.objects.filter(is_active=True).select_related('quota_type')
+        quota_type_id = self.request.query_params.get('quota_type_id')
+        search = self.request.query_params.get('search')
+        if quota_type_id:
+            queryset = queryset.filter(quota_type_id=quota_type_id)
+        if search:
+            queryset = queryset.filter(name__icontains=search)
+        return queryset
+
+    @action(detail=True, methods=['get'], url_path='delegates')
+    def delegates(self, request, pk=None):
+        university = self.get_object()
+        delegates = university.delegates.filter(is_active=True)
+        serializer = DelegateSerializer(delegates, many=True)
+        return Response(serializer.data)
+    
+class DelegateViewSet(viewsets.ModelViewSet):
+    queryset = Delegate.objects.filter(is_active=True).select_related('partner_university')
+    serializer_class = DelegateSerializer
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get_queryset(self):
+        queryset = super().get_queryset()
+
+        partner_university_id = self.request.query_params.get('partner_university_id')
+
+        if partner_university_id:
+            queryset = queryset.filter(partner_university_id=partner_university_id)
+
         return queryset
 
 class ParticipantValidationView(APIView):

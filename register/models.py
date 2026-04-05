@@ -104,3 +104,20 @@ class Refund(models.Model):
 
     class Meta:
         db_table = 'refunds'
+
+
+class DynamicCode(models.Model):
+    quota_type = models.ForeignKey(
+        QuotaType,
+        on_delete=models.PROTECT,
+        db_column='quota_type_id'
+    )
+    code = models.CharField(max_length=5, unique=True)
+    status = models.CharField(max_length=20, default='available')
+    is_active = models.BooleanField(default=True)
+
+    def __str__(self):
+        return f"{self.code} - {self.status}"
+
+    class Meta:
+        db_table = 'dynamic_codes'

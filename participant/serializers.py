@@ -1,7 +1,8 @@
 import re
 
 from rest_framework import serializers
-from .models import SpecialCondition, Participant, ParticipantSpecialCondition, Enrollment
+from .models import SpecialCondition, Participant, ParticipantSpecialCondition, Enrollment, PartnerUniversity, Delegate
+from register.serializers import QuotaTypeSerializer
 
 
 class SpecialConditionSerializer(serializers.ModelSerializer):
@@ -50,6 +51,29 @@ class ParticipantDetailSerializer(serializers.ModelSerializer):
             is_active=True
         )
         return EnrollmentSerializer(enrollments, many=True).data
+    
+class PartnerUniversitySerializer(serializers.ModelSerializer):
+    class Meta:
+        model = PartnerUniversity
+        fields = '__all__'
+        read_only_fields = ['id', 'code']  # se genera automáticamente
+
+class DelegateSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Delegate
+        fields = '__all__'
+
+class PartnerUniversityDetailSerializer(serializers.ModelSerializer):
+    delegates = serializers.SerializerMethodField()
+    quota_type = QuotaTypeSerializer(read_only=True)  # 👈 muestra nombre en vez de ID
+
+    class Meta:
+        model = PartnerUniversity
+        fields = '__all__'
+
+    def get_delegates(self, obj):
+        delegates = obj.delegates.filter(is_active=True)
+        return DelegateSerializer(delegates, many=True).data
 
 class ParticipantValidationSerializer(serializers.Serializer):
     first_name = serializers.CharField(

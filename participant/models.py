@@ -1,5 +1,12 @@
+import string
+import random
 from django.db import models
-from register.models import Registration
+from register.models import Registration, QuotaType
+
+def generate_partner_code():
+    letters = ''.join(random.choices(string.ascii_uppercase, k=2))
+    digits = ''.join(random.choices(string.digits, k=3))
+    return letters + digits
 
 class SpecialCondition(models.Model):
     name = models.CharField(max_length=50)
@@ -27,7 +34,8 @@ class Participant(models.Model):
     document_type = models.CharField(max_length=20)
     email = models.EmailField(max_length=255, unique=True)
     cod_country = models.IntegerField()
-    cod_university = models.IntegerField()
+    cod_university = models.CharField(max_length=5)
+    university_type = models.CharField(max_length=15)
     academic_cycle = models.CharField(max_length=4)
     is_active = models.BooleanField(default=True)
 
@@ -74,3 +82,59 @@ class Enrollment(models.Model):
 
     class Meta:
         db_table = 'enrollments'
+
+class PartnerUniversity(models.Model):
+    id = models.BigAutoField(primary_key=True)
+
+    code = models.CharField(
+        max_length=5,
+        unique=True,
+        editable=False,
+        null=True,
+        blank=True
+    )
+
+    quota_type = models.ForeignKey(
+        QuotaType,
+        on_delete=models.CASCADE,
+        db_column='quota_type_id',
+    )
+    name = models.CharField(max_length=100)
+    abbreviation = models.CharField(max_length=10)
+    place = models.CharField(max_length=20)
+    country = models.CharField(max_length=30)
+    region = models.CharField(max_length=20)
+    is_active = models.BooleanField(default=True)
+
+    def save(self, *args, **kwargs):
+        if not self.code:
+            while True:
+                new_code = generate_partner_code()
+                if not PartnerUniversity.objects.filter(code=new_code).exists():
+                    self.code = new_code
+                    break
+        super().save(*args, **kwargs)
+
+    def __str__(self):
+        return f"{self.name} ({self.code})"
+
+    class Meta:
+        db_table = 'partner_universities'
+        
+class Delegate(models.Model):
+    partner_university = models.ForeignKey(
+        PartnerUniversity,
+        on_delete=models.CASCADE,
+        db_column='partner_university_id',
+        related_name='delegates'
+    )
+    type_delegate = models.CharField(max_length=15)
+    fullname = models.CharField(max_length=100)
+    cellphone = models.CharField(max_length=20)
+    is_active = models.BooleanField(default=True)
+
+    def __str__(self):
+        return f"{self.fullname} - {self.partner_university_id}"
+
+    class Meta:
+        db_table = 'delegates'
