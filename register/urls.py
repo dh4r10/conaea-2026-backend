@@ -7,7 +7,9 @@ from .views import (
     RegistrationViewSet,
     TransactionViewSet,
     RefundViewSet,
-    DynamicCodeViewSet
+    DynamicCodeViewSet,
+    VerifyCodeView,    # 👈
+    InscriptionView,
 )
 
 router = routers.DefaultRouter()
@@ -22,4 +24,6 @@ router.register('dynamic-code', DynamicCodeViewSet, basename='dynamic_code')
 
 urlpatterns = [
     path('register/', include(router.urls)),
+    path('register/verify-code/', VerifyCodeView.as_view(), name='verify_code'),
+    path('register/inscription/', InscriptionView.as_view(), name='inscription'),
 ]

@@ -75,6 +75,10 @@ class PartnerUniversityDetailSerializer(serializers.ModelSerializer):
         delegates = obj.delegates.filter(is_active=True)
         return DelegateSerializer(delegates, many=True).data
 
+import re
+from rest_framework import serializers
+
+
 class ParticipantValidationSerializer(serializers.Serializer):
     first_name = serializers.CharField(
         max_length=50,
@@ -92,6 +96,19 @@ class ParticipantValidationSerializer(serializers.Serializer):
             'max_length': 'Máximo 50 caracteres'
         }
     )
+    photograph = serializers.ImageField(
+        error_messages={
+            'required': 'La fotografía es requerida',
+            'invalid': 'Archivo de imagen inválido'
+        }
+    )
+
+    def validate_photograph(self, value):
+        valid_extensions = ('.jpg', '.jpeg', '.png')
+        if not value.name.lower().endswith(valid_extensions):
+            raise serializers.ValidationError('Solo se permiten imágenes JPG o PNG')
+        return value
+
     maternal_surname = serializers.CharField(
         max_length=50,
         error_messages={
@@ -105,6 +122,7 @@ class ParticipantValidationSerializer(serializers.Serializer):
         error_messages={
             'blank': 'Este campo no puede estar vacío',
             'required': 'Este campo es requerido',
+            'max_length': 'Máximo 10 caracteres'
         }
     )
     document_type = serializers.ChoiceField(
@@ -123,64 +141,73 @@ class ParticipantValidationSerializer(serializers.Serializer):
             'max_length': 'Máximo 255 caracteres'
         }
     )
+    # Solo requerido en General, en Referido se omite o llega '---'
     cod_country = serializers.IntegerField(
+        required=False,
+        allow_null=True,
         error_messages={
-            'required': 'Este campo es requerido',
             'invalid': 'Debe ser un número entero'
         }
     )
-    cod_university = serializers.IntegerField(
+    # CharField porque en Referido es el code (ej. 'AB123')
+    # y en General es el código que envía el frontend
+    cod_university = serializers.CharField(
+        max_length=5,
+        required=False,
+        allow_blank=True,
         error_messages={
-            'required': 'Este campo es requerido',
-            'invalid': 'Debe ser un número entero'
+            'max_length': 'Máximo 5 caracteres'
         }
     )
     academic_cycle = serializers.CharField(
         max_length=4,
         error_messages={
+            'blank': 'Este campo no puede estar vacío',
             'required': 'Este campo es requerido',
+            'max_length': 'Máximo 4 caracteres'
         }
     )
     birthdate = serializers.DateField(
         error_messages={
             'required': 'Este campo es requerido',
+            'invalid': 'Ingrese una fecha válida (YYYY-MM-DD)'
         }
     )
+    # Se valida manualmente en la view, pero se incluye aquí para validar formato PDF
     archive = serializers.FileField(
         error_messages={
             'required': 'La ficha de matrícula es requerida',
             'invalid': 'Archivo inválido'
         }
     )
-    allergy = serializers.CharField(
-        error_messages={
-            'required': 'Este campo es requerido',
-            'invalid': 'Este campo es requerido',
-            'blank': 'La alergía es requerida'
-        }
+    # Opcionales — se omiten si vienen vacíos
+    discapacidad = serializers.CharField(
+        required=False,
+        allow_blank=True,
+        default=''
     )
-    disability = serializers.CharField(
-        error_messages={
-            'required': 'Este campo es requerido',
-            'invalid': 'Este campo es requerido',
-            'blank': 'La discapacidad es requerida'
-        }
+    alergia = serializers.CharField(
+        required=False,
+        allow_blank=True,
+        default=''
     )
+
+    # ── Validaciones de campo ──────────────────────────────────────────
 
     def validate_first_name(self, value):
         if not re.match(r'^[a-zA-ZáéíóúÁÉÍÓÚñÑüÜ\s]+$', value):
             raise serializers.ValidationError('Solo se permiten letras')
-        return value
+        return value.strip()
 
     def validate_paternal_surname(self, value):
         if not re.match(r'^[a-zA-ZáéíóúÁÉÍÓÚñÑüÜ\s]+$', value):
             raise serializers.ValidationError('Solo se permiten letras')
-        return value
+        return value.strip()
 
     def validate_maternal_surname(self, value):
         if not re.match(r'^[a-zA-ZáéíóúÁÉÍÓÚñÑüÜ\s]+$', value):
             raise serializers.ValidationError('Solo se permiten letras')
-        return value
+        return value.strip()
 
     def validate_identity_document(self, value):
         if not value.isdigit():
@@ -188,13 +215,15 @@ class ParticipantValidationSerializer(serializers.Serializer):
         return value
 
     def validate_archive(self, value):
-        if not value.name.endswith('.pdf'):
+        if not value.name.lower().endswith('.pdf'):
             raise serializers.ValidationError('Solo se permiten archivos PDF')
         return value
 
+    # ── Validaciones cruzadas ──────────────────────────────────────────
+
     def validate(self, data):
         document_type = data.get('document_type')
-        identity_document = data.get('identity_document')
+        identity_document = data.get('identity_document', '')
 
         if document_type == 'DNI' and len(identity_document) != 8:
             raise serializers.ValidationError({
@@ -204,4 +233,6 @@ class ParticipantValidationSerializer(serializers.Serializer):
             raise serializers.ValidationError({
                 'identity_document': 'El pasaporte debe tener máximo 10 dígitos'
             })
+
         return data
+    

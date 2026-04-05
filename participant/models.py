@@ -26,6 +26,7 @@ class Participant(models.Model):
         on_delete=models.CASCADE,
         db_column='registration_id',
     )
+    photograph = models.ImageField(upload_to='participants/')
     first_name = models.CharField(max_length=50)
     paternal_surname = models.CharField(max_length=50)
     maternal_surname = models.CharField(max_length=50)

@@ -5,6 +5,7 @@ from rest_framework.response import Response
 from rest_framework.parsers import MultiPartParser, FormParser
 
 from .models import SpecialCondition, Participant, ParticipantSpecialCondition, Enrollment, PartnerUniversity, Delegate
+from register.models import AvailableSlot
 from .serializers import (
     SpecialConditionSerializer,
     ParticipantSerializer,
@@ -14,7 +15,7 @@ from .serializers import (
     ParticipantValidationSerializer,
     PartnerUniversitySerializer,
     PartnerUniversityDetailSerializer,
-    DelegateSerializer
+    DelegateSerializer,
 )
 from .pagination import StandardPagination
 
@@ -156,3 +157,49 @@ class ParticipantValidationView(APIView):
             serializer.errors,
             status=status.HTTP_400_BAD_REQUEST
         )
+    
+class ParticipantByDNIView(APIView):
+    permission_classes = [permissions.AllowAny]
+
+    def get(self, request):
+        dni = request.query_params.get('dni', '').strip()
+
+        if not dni:
+            return Response(
+                {'error': 'El DNI es requerido'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        try:
+            participant = Participant.objects.select_related(
+                'registration__quota_type',
+                'registration__pre_sale',
+            ).get(identity_document=dni, is_active=True)
+        except Participant.DoesNotExist:
+            return Response(
+                {'error': 'No se encontró ningún participante con ese DNI'},
+                status=status.HTTP_404_NOT_FOUND
+            )
+
+        # Obtener monto desde available_slot
+        try:
+            slot = AvailableSlot.objects.get(
+                pre_sale=participant.registration.pre_sale,
+                quota_type=participant.registration.quota_type,
+                is_active=True
+            )
+            mount = slot.mount
+        except AvailableSlot.DoesNotExist:
+            mount = None
+
+        return Response({
+            'participant_id': participant.id,
+            'registration_id': participant.registration.id,
+            'registration_uuid': str(participant.registration.uuid),
+            'full_name': f"{participant.first_name} {participant.paternal_surname} {participant.maternal_surname}",
+            'email': participant.email,
+            'university_type': participant.university_type,
+            'quota_type': participant.registration.quota_type.name,
+            'currency': participant.registration.quota_type.currency,
+            'mount': mount,
+        }, status=status.HTTP_200_OK)

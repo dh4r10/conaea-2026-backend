@@ -1,3 +1,4 @@
+from django.utils import timezone
 from rest_framework import viewsets, permissions, status
 from rest_framework.decorators import action
 from rest_framework.response import Response
@@ -22,6 +23,7 @@ from .serializers import (
     DynamicCodeDetailSerializer
 )
 from participant.serializers import ParticipantSerializer, ParticipantValidationSerializer
+from participant.models import PartnerUniversity, ParticipantSpecialCondition
 from .pagination import StandardPagination
 import random
 import string
@@ -144,6 +146,7 @@ class RegistrationViewSet(viewsets.ModelViewSet):
 class TransactionViewSet(viewsets.ModelViewSet):
     queryset = Transaction.objects.filter(is_active=True)
     permission_classes = [permissions.AllowAny]
+    parser_classes = [MultiPartParser, FormParser]
 
     def get_serializer_class(self):
         if self.action == 'retrieve':
@@ -156,6 +159,17 @@ class TransactionViewSet(viewsets.ModelViewSet):
         if registration_id:
             queryset = queryset.filter(registration_id=registration_id)
         return queryset
+    
+    def create(self, request, *args, **kwargs):
+        payment_method = request.data.get('payment_method', '').strip()
+        valid_methods = ('yape', 'bcp', 'bbva')
+
+        if payment_method not in valid_methods:
+            return Response(
+                {'error': f'Método de pago inválido. Opciones: {", ".join(valid_methods)}'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        return super().create(request, *args, **kwargs)
 
 
 class RefundViewSet(viewsets.ModelViewSet):
@@ -170,6 +184,7 @@ class RefundViewSet(viewsets.ModelViewSet):
             queryset = queryset.filter(transaction_id=transaction_id)
         return queryset
     
+
 class DynamicCodeViewSet(viewsets.ModelViewSet):
     permission_classes = [permissions.IsAuthenticated]
     pagination_class = StandardPagination
@@ -224,121 +239,300 @@ class DynamicCodeViewSet(viewsets.ModelViewSet):
         serializer = DynamicCodeDetailSerializer(dynamic_code)
         return Response(serializer.data, status=status.HTTP_201_CREATED)
     
+
+class VerifyCodeView(APIView):
+    """
+    Verifica el código de inscripción según el tipo.
+
+    Referido  → busca en partner_universities.code
+    General   → busca en dynamic_codes.code con status='Disponible'
+
+    POST /api/register/verify-code/
+    Body: { "university_type": "Referido"|"General", "code": "AB123" }
+    """
+    permission_classes = [permissions.AllowAny]
+
+    def post(self, request):
+        university_type = request.data.get('university_type', '').strip()
+        code = request.data.get('code', '').strip()
+
+        if not university_type or not code:
+            return Response(
+                {'error': 'Los campos university_type y code son requeridos'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        if university_type not in ('Referido', 'General'):
+            return Response(
+                {'error': 'university_type debe ser "Referido" o "General"'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        # ── Caso Referido ──────────────────────────────────────────────
+        if university_type == 'Referido':
+            try:
+                university = PartnerUniversity.objects.select_related(
+                    'quota_type'
+                ).get(code=code, is_active=True)
+            except PartnerUniversity.DoesNotExist:
+                return Response(
+                    {'error': 'Código de universidad referida no válido'},
+                    status=status.HTTP_404_NOT_FOUND
+                )
+
+            return Response({
+                'valid': True,
+                'university_type': 'Referido',
+                'cod_university': university.code,
+                'university_name': university.name,
+                'country': university.country,
+                'region': university.region,
+                'place': university.place,
+                'quota_type_id': university.quota_type.id,
+            }, status=status.HTTP_200_OK)
+
+        # ── Caso General ───────────────────────────────────────────────
+        try:
+            dynamic_code = DynamicCode.objects.select_related(
+                'quota_type'
+            ).get(code=code, is_active=True)
+        except DynamicCode.DoesNotExist:
+            return Response(
+                {'error': 'Código dinámico no encontrado'},
+                status=status.HTTP_404_NOT_FOUND
+            )
+
+        if dynamic_code.status != 'Disponible':
+            return Response(
+                {'error': 'El código dinámico ya fue usado o no está disponible'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        return Response({
+            'valid': True,
+            'university_type': 'General',
+            'quota_type_id': dynamic_code.quota_type.id,
+        }, status=status.HTTP_200_OK)
+
+
 class InscriptionView(APIView):
+    """
+    Registra la inscripción completa de un participante.
+
+    POST /api/register/inscription/
+    Acepta multipart/form-data (por el archivo .pdf)
+
+    Campos requeridos comunes:
+        university_type, code, pre_sale_id (opcional si hay solo una activa),
+        first_name, paternal_surname, maternal_surname, birthdate,
+        identity_document, document_type, email, academic_cycle, archive
+
+    Solo General:
+        cod_country, cod_university
+
+    Referido:
+        cod_country puede venir como '---' o vacío (se guarda 0)
+
+    Opcionales:
+        discapacidad, alergia  (texto; se omiten si vacíos)
+    """
     permission_classes = [permissions.AllowAny]
     parser_classes = [MultiPartParser, FormParser]
 
     @db_transaction.atomic
     def post(self, request):
-        # 1. Validar formulario primero
-        serializer = ParticipantValidationSerializer(data=request.data)
-        if not serializer.is_valid():
-            return Response(
-                serializer.errors,
-                status=status.HTTP_400_BAD_REQUEST
-            )
-
         data = request.data
-        voucher = request.FILES.get('voucher')
-        archive = request.FILES.get('archive')
+        university_type = data.get('university_type', '').strip()
+        code = data.get('code', '').strip()
 
-        if not voucher:
+        # ── 1. Validar tipo ────────────────────────────────────────────
+        if university_type not in ('Referido', 'General'):
             return Response(
-                {'error': 'El voucher de pago es requerido'},
+                {'error': 'university_type debe ser "Referido" o "General"'},
                 status=status.HTTP_400_BAD_REQUEST
             )
+
+        # ── 2. Resolver universidad / código dinámico ──────────────────
+        university = None
+        dynamic_code = None
+        quota_type = None
+        cod_university = None
+        cod_country = None
+
+        if university_type == 'Referido':
+            try:
+                university = PartnerUniversity.objects.select_related(
+                    'quota_type'
+                ).get(code=code, is_active=True)
+            except PartnerUniversity.DoesNotExist:
+                return Response(
+                    {'error': 'Código de universidad referida no válido'},
+                    status=status.HTTP_404_NOT_FOUND
+                )
+            quota_type = university.quota_type
+            cod_university = university.code
+            cod_country = 0  # valor por defecto para Referido
+
+        else:  # General
+            try:
+                dynamic_code = DynamicCode.objects.select_related(
+                    'quota_type'
+                ).get(code=code, is_active=True)
+            except DynamicCode.DoesNotExist:
+                return Response(
+                    {'error': 'Código dinámico no encontrado'},
+                    status=status.HTTP_404_NOT_FOUND
+                )
+            if dynamic_code.status != 'Disponible':
+                return Response(
+                    {'error': 'El código dinámico ya fue usado o no está disponible'},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+            quota_type = dynamic_code.quota_type
+            cod_university = data.get('cod_university', '').strip()
+            cod_country_raw = data.get('cod_country', '')
+            try:
+                cod_country = int(cod_country_raw)
+            except (ValueError, TypeError):
+                return Response(
+                    {'error': 'cod_country debe ser un número entero'},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+
+        # ── 3. Validar formulario del participante ─────────────────────
+        serializer = ParticipantValidationSerializer(data=data)
+        if not serializer.is_valid():
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+        # ── 4. Verificar archivos ───────────────────────────────────
+        archive = request.FILES.get('archive')
         if not archive:
             return Response(
                 {'error': 'La ficha de matrícula es requerida'},
                 status=status.HTTP_400_BAD_REQUEST
             )
 
-        # 2. Validar cupos disponibles
-        pre_sale_id = data.get('pre_sale_id')
-        quota_type_id = data.get('quota_type_id')
+        photograph = request.FILES.get('photograph')  # 👈
+        if not photograph:
+            return Response(
+                {'error': 'La fotografía es requerida'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
 
+        # ── 5. Obtener preventa activa ─────────────────────────────────
+        now = timezone.now()
+        try:
+            pre_sale = PreSale.objects.get(
+                start_date__lte=now,
+                end_date__gte=now,
+                is_active=True
+            )
+        except PreSale.DoesNotExist:
+            return Response(
+                {'error': 'No hay una preventa activa en este momento'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        except PreSale.MultipleObjectsReturned:
+            return Response(
+                {'error': 'Existe más de una preventa activa. Contacta al administrador'},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+
+        # ── 6. Verificar cupos disponibles ────────────────────────────
         try:
             slot = AvailableSlot.objects.get(
-                pre_sale_id=pre_sale_id,
-                quota_type_id=quota_type_id,
+                pre_sale=pre_sale,
+                quota_type=quota_type,
                 is_active=True
             )
         except AvailableSlot.DoesNotExist:
             return Response(
-                {'error': 'No existe el cupo para esta preventa'},
+                {'error': 'No hay cupos configurados para esta categoría'},
                 status=status.HTTP_400_BAD_REQUEST
             )
 
         used = Registration.objects.filter(
-            pre_sale_id=pre_sale_id,
-            quota_type_id=quota_type_id,
+            pre_sale=pre_sale,
+            quota_type=quota_type,
             is_active=True
         ).count()
 
         if used >= slot.amount:
             return Response(
-                {'error': 'No hay cupos disponibles'},
+                {'error': 'No hay cupos disponibles para esta categoría'},
                 status=status.HTTP_400_BAD_REQUEST
             )
 
-        # 3. Validar que identity_document y email no estén ya registrados
-        if Participant.objects.filter(identity_document=data.get('identity_document')).exists():
+        # ── 7. Verificar duplicados ───────────────────────────────────
+        identity_document = data.get('identity_document', '').strip()
+        email = data.get('email', '').strip()
+
+        if Participant.objects.filter(identity_document=identity_document).exists():
             return Response(
-                {'identity_document': 'Este documento ya está registrado'},
+                {'identity_document': 'Ya existe un participante con este documento'},
                 status=status.HTTP_400_BAD_REQUEST
             )
-        if Participant.objects.filter(email=data.get('email')).exists():
+        if Participant.objects.filter(email=email).exists():
             return Response(
-                {'email': 'Este email ya está registrado'},
+                {'email': 'Ya existe un participante con este correo'},
                 status=status.HTTP_400_BAD_REQUEST
             )
 
-        # 4. Crear Registration
+        # ── 8. Crear Registration ─────────────────────────────────────
         registration = Registration.objects.create(
-            pre_sale_id=pre_sale_id,
-            quota_type_id=quota_type_id,
+            pre_sale=pre_sale,
+            quota_type=quota_type,
         )
 
-        # 5. Crear Participant
-        participant_data = {
-            'registration': registration.id,
-            'first_name': data.get('first_name'),
-            'paternal_surname': data.get('paternal_surname'),
-            'maternal_surname': data.get('maternal_surname'),
-            'birthdate': data.get('birthdate'),
-            'identity_document': data.get('identity_document'),
-            'document_type': data.get('document_type'),
-            'email': data.get('email'),
-            'cod_country': data.get('cod_country'),
-            'cod_university': data.get('cod_university'),
-            'academic_cycle': data.get('academic_cycle'),
-        }
+        # ── 9. Crear Participant ──────────────────────────────────────
+        participant = Participant.objects.create(
+            registration=registration,
+            photograph=photograph,          # 👈
+            first_name=data.get('first_name', '').strip(),
+            paternal_surname=data.get('paternal_surname', '').strip(),
+            maternal_surname=data.get('maternal_surname', '').strip(),
+            birthday=data.get('birthdate'),
+            identity_document=identity_document,
+            document_type=data.get('document_type', '').strip(),
+            email=email,
+            cod_country=cod_country,
+            cod_university=cod_university,
+            university_type=university_type,
+            academic_cycle=data.get('academic_cycle', '').strip(),
+        )
 
-        participant_serializer = ParticipantSerializer(data=participant_data)
-        if not participant_serializer.is_valid():
-            raise Exception(participant_serializer.errors)
-        participant = participant_serializer.save()
-
-        # 6. Crear Enrollment con PDF
-        enrollment = Enrollment.objects.create(
+        # ── 10. Crear Enrollment (ficha de matrícula) ─────────────────
+        Enrollment.objects.create(
             participant=participant,
-            type='ficha',
+            type='matricula',
             archive=archive,
         )
 
-        # 7. Crear Transaction con voucher
-        transaction = Transaction.objects.create(
-            registration=registration,
-            payment_method=data.get('payment_method'),
-            mount=slot.mount,
-            voucher=voucher,
-        )
+        # ── 11. Registrar condiciones especiales (si vienen) ──────────
+        discapacidad = data.get('discapacidad', '').strip()
+        alergia = data.get('alergia', '').strip()
+
+        if discapacidad:
+            ParticipantSpecialCondition.objects.create(
+                participant=participant,
+                special_condition_id=1,  # Discapacidad
+                description=discapacidad,
+            )
+        if alergia:
+            ParticipantSpecialCondition.objects.create(
+                participant=participant,
+                special_condition_id=2,  # Alergia
+                description=alergia,
+            )
+
+        # ── 12. Marcar código dinámico como Usado (solo General) ──────
+        if dynamic_code:
+            dynamic_code.status = 'Usado'
+            dynamic_code.used_at = now
+            dynamic_code.save(update_fields=['status', 'used_at'])
 
         return Response({
-            'registration_id': registration.id,
+            'message': 'Inscripción registrada exitosamente',
             'registration_uuid': str(registration.uuid),
             'participant_id': participant.id,
-            'enrollment_id': enrollment.id,
-            'transaction_id': transaction.id,
-            'message': 'Inscripción creada exitosamente'
         }, status=status.HTTP_201_CREATED)
