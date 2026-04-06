@@ -415,28 +415,28 @@ class InscriptionView(APIView):
                     status=status.HTTP_400_BAD_REQUEST
                 )
             quota_type = dynamic_code.quota_type
-            cod_university = data.get('cod_university', '').strip()
-            cod_country_raw = data.get('cod_country', '')
-            try:
-                cod_country = int(cod_country_raw)
-            except (ValueError, TypeError):
-                return Response(
-                    {'error': 'cod_country debe ser un número entero'},
-                    status=status.HTTP_400_BAD_REQUEST
-                )
+            cod_university = '0'   # 👈 fijo
+            cod_country = 0        # 👈 fijo
 
         # ── 3. Validar formulario del participante ─────────────────────
+        data = request.data.copy()
+        for field in ('discapacidad', 'alergia'):
+            if data.get(field, '').strip() == '-':
+                data[field] = ''
+
         serializer = ParticipantValidationSerializer(data=data)
         if not serializer.is_valid():
             return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
         # ── 4. Verificar archivos ───────────────────────────────────
-        archive = request.FILES.get('archive')
-        if not archive:
-            return Response(
-                {'error': 'La ficha de matrícula es requerida'},
-                status=status.HTTP_400_BAD_REQUEST
-            )
+        archive = None
+        if university_type == 'Referido':
+            archive = request.FILES.get('archive')
+            if not archive:
+                return Response(
+                    {'error': 'La ficha de matrícula es requerida'},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
 
         photograph = request.FILES.get('photograph')  # 👈
         if not photograph:
@@ -531,15 +531,16 @@ class InscriptionView(APIView):
             cod_country=cod_country,
             cod_university=cod_university,
             university_type=university_type,
-            academic_cycle=data.get('academic_cycle', '').strip(),
+            academic_cycle=data.get('academic_cycle', '0').strip() if university_type == 'Referido' else '0',  # 👈
         )
 
         # ── 10. Crear Enrollment (ficha de matrícula) ─────────────────
-        Enrollment.objects.create(
-            participant=participant,
-            type='matricula',
-            archive=archive,
-        )
+        if archive:
+            Enrollment.objects.create(
+                participant=participant,
+                type='matricula',
+                archive=archive,
+            )
 
         # ── 11. Registrar condiciones especiales (si vienen) ──────────
         discapacidad = data.get('discapacidad', '').strip()
@@ -569,3 +570,4 @@ class InscriptionView(APIView):
             'registration_uuid': str(registration.uuid),
             'participant_id': participant.id,
         }, status=status.HTTP_201_CREATED)
+    

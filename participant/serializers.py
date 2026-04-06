@@ -162,9 +162,10 @@ class ParticipantValidationSerializer(serializers.Serializer):
     )
     academic_cycle = serializers.CharField(
         max_length=4,
+        required=False,       # 👈
+        allow_blank=True,
+        default='0',
         error_messages={
-            'blank': 'Este campo no puede estar vacío',
-            'required': 'Este campo es requerido',
             'max_length': 'Máximo 4 caracteres'
         }
     )
@@ -176,8 +177,8 @@ class ParticipantValidationSerializer(serializers.Serializer):
     )
     # Se valida manualmente en la view, pero se incluye aquí para validar formato PDF
     archive = serializers.FileField(
+        required=False,       # 👈 la view ya lo valida condicionalmente
         error_messages={
-            'required': 'La ficha de matrícula es requerida',
             'invalid': 'Archivo inválido'
         }
     )
