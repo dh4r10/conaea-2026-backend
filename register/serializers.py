@@ -40,6 +40,14 @@ class TransactionSerializer(serializers.ModelSerializer):
         model = Transaction
         fields = '__all__'
 
+    def validate_voucher(self, value):
+        valid_extensions = ('.jpg', '.jpeg', '.png')
+        if not value.name.lower().endswith(valid_extensions):
+            raise serializers.ValidationError('Solo se permiten imágenes JPG o PNG')
+        if value.size > 500 * 1024:
+            raise serializers.ValidationError('La imagen no debe superar los 500 KB')
+        return value
+
 class TransactionDetailSerializer(serializers.ModelSerializer):
     refund = serializers.SerializerMethodField()
 

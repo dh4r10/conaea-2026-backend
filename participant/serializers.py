@@ -1,5 +1,4 @@
 import re
-
 from rest_framework import serializers
 from .models import SpecialCondition, Participant, ParticipantSpecialCondition, Enrollment, PartnerUniversity, Delegate
 from register.serializers import QuotaTypeSerializer
@@ -52,16 +51,19 @@ class ParticipantDetailSerializer(serializers.ModelSerializer):
         )
         return EnrollmentSerializer(enrollments, many=True).data
     
+
 class PartnerUniversitySerializer(serializers.ModelSerializer):
     class Meta:
         model = PartnerUniversity
         fields = '__all__'
         read_only_fields = ['id', 'code']  # se genera automáticamente
 
+
 class DelegateSerializer(serializers.ModelSerializer):
     class Meta:
         model = Delegate
         fields = '__all__'
+
 
 class PartnerUniversityDetailSerializer(serializers.ModelSerializer):
     delegates = serializers.SerializerMethodField()
@@ -74,9 +76,6 @@ class PartnerUniversityDetailSerializer(serializers.ModelSerializer):
     def get_delegates(self, obj):
         delegates = obj.delegates.filter(is_active=True)
         return DelegateSerializer(delegates, many=True).data
-
-import re
-from rest_framework import serializers
 
 
 class ParticipantValidationSerializer(serializers.Serializer):
@@ -107,6 +106,8 @@ class ParticipantValidationSerializer(serializers.Serializer):
         valid_extensions = ('.jpg', '.jpeg', '.png')
         if not value.name.lower().endswith(valid_extensions):
             raise serializers.ValidationError('Solo se permiten imágenes JPG o PNG')
+        if value.size > 500 * 1024:
+            raise serializers.ValidationError('La fotografía no debe superar los 500 KB')
         return value
 
     maternal_surname = serializers.CharField(
@@ -217,6 +218,8 @@ class ParticipantValidationSerializer(serializers.Serializer):
     def validate_archive(self, value):
         if not value.name.lower().endswith('.pdf'):
             raise serializers.ValidationError('Solo se permiten archivos PDF')
+        if value.size > 300 * 1024:
+            raise serializers.ValidationError('El archivo no debe superar los 300 KB')
         return value
 
     # ── Validaciones cruzadas ──────────────────────────────────────────

@@ -34,6 +34,7 @@ def generate_dynamic_code():
     digits = ''.join(random.choices(string.digits, k=2))
     return letters + digits
 
+
 class PreSaleViewSet(viewsets.ModelViewSet):
     queryset = PreSale.objects.filter(is_active=True)
     serializer_class = PreSaleSerializer
@@ -467,11 +468,18 @@ class InscriptionView(APIView):
         identity_document = data.get('identity_document', '').strip()
         email = data.get('email', '').strip()
 
-        if Participant.objects.filter(identity_document=identity_document).exists():
-            return Response(
-                {'identity_document': 'Ya existe un participante con este documento'},
-                status=status.HTTP_400_BAD_REQUEST
-            )
+        existing_participant = Participant.objects.filter(
+            identity_document=identity_document
+        ).select_related('registration').first()
+
+        if existing_participant:
+            # Ya se inscribió (posible reintento por timeout)
+            return Response({
+                'message': 'Inscripción ya registrada previamente',
+                'registration_uuid': str(existing_participant.registration.uuid),
+                'participant_id': existing_participant.id,
+            }, status=status.HTTP_200_OK)  # No lanzar error
+
         if Participant.objects.filter(email=email).exists():
             return Response(
                 {'email': 'Ya existe un participante con este correo'},

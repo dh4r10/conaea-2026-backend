@@ -1,12 +1,18 @@
+import io
 import string
 import random
+from PIL import Image
 from django.db import models
 from register.models import Registration, QuotaType
+from django.core.files.base import ContentFile
 
 def generate_partner_code():
     letters = ''.join(random.choices(string.ascii_uppercase, k=2))
     digits = ''.join(random.choices(string.digits, k=3))
     return letters + digits
+
+def photograph_upload_path(instance, filename):
+    return f'participants/{instance.identity_document}.webp'
 
 class SpecialCondition(models.Model):
     name = models.CharField(max_length=50)
@@ -26,7 +32,7 @@ class Participant(models.Model):
         on_delete=models.CASCADE,
         db_column='registration_id',
     )
-    photograph = models.ImageField(upload_to='participants/')
+    photograph = models.ImageField(upload_to=photograph_upload_path)
     first_name = models.CharField(max_length=50)
     paternal_surname = models.CharField(max_length=50)
     maternal_surname = models.CharField(max_length=50)
@@ -42,6 +48,27 @@ class Participant(models.Model):
 
     def __str__(self):
         return f"{self.identity_document} - {self.first_name} {self.paternal_surname}"
+    
+    def save(self, *args, **kwargs):
+        if self.pk:
+            old = Participant.objects.filter(pk=self.pk).first()
+            if old and old.photograph == self.photograph:
+                return super().save(*args, **kwargs)
+
+        if self.photograph and hasattr(self.photograph, 'file'):
+            img = Image.open(self.photograph)
+            if img.mode not in ('RGB', 'RGBA'):
+                img = img.convert('RGB')
+            buffer = io.BytesIO()
+            img.save(buffer, format='WEBP', quality=85)
+            buffer.seek(0)
+            self.photograph.save(
+                f'{self.identity_document}.webp',
+                ContentFile(buffer.read()),
+                save=False
+            )
+
+        super().save(*args, **kwargs)
 
     class Meta:
         db_table = 'participants'

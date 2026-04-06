@@ -1,6 +1,12 @@
+import io
 import uuid
+from PIL import Image
 from django.db import models
+from django.core.files.base import ContentFile
 
+
+def voucher_upload_path(instance, filename):
+    return f'vouchers/{instance.registration_id}_{instance.payment_method}.webp'
 
 class PreSale(models.Model):
     name = models.CharField(max_length=50)
@@ -79,12 +85,33 @@ class Transaction(models.Model):
     )
     payment_method = models.CharField(max_length=20)
     mount = models.DecimalField(max_digits=10, decimal_places=2)
-    voucher = models.FileField(upload_to='vouchers/')
+    voucher = models.ImageField(upload_to=voucher_upload_path)
     created_at = models.DateTimeField(auto_now_add=True)
     is_active = models.BooleanField(default=True)
 
     def __str__(self):
         return f"{self.registration} - {self.mount}"
+    
+    def save(self, *args, **kwargs):
+        if self.pk:
+            old = Transaction.objects.filter(pk=self.pk).first()
+            if old and old.voucher == self.voucher:
+                return super().save(*args, **kwargs)
+
+        if self.voucher and hasattr(self.voucher, 'file'):
+            img = Image.open(self.voucher)
+            if img.mode not in ('RGB', 'RGBA'):
+                img = img.convert('RGB')
+            buffer = io.BytesIO()
+            img.save(buffer, format='WEBP', quality=85)
+            buffer.seek(0)
+            self.voucher.save(
+                f'{self.registration_id}_{self.payment_method}.webp',
+                ContentFile(buffer.read()),
+                save=False
+            )
+
+        super().save(*args, **kwargs)
 
     class Meta:
         db_table = 'transactions'
