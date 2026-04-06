@@ -277,7 +277,7 @@ class VerifyCodeView(APIView):
                 ).get(code=code, is_active=True)
             except PartnerUniversity.DoesNotExist:
                 return Response(
-                    {'error': 'Código de universidad referida no válido'},
+                    {'error': 'Código inválido'},
                     status=status.HTTP_404_NOT_FOUND
                 )
 
@@ -299,13 +299,13 @@ class VerifyCodeView(APIView):
             ).get(code=code, is_active=True)
         except DynamicCode.DoesNotExist:
             return Response(
-                {'error': 'Código dinámico no encontrado'},
+                {'error': 'Código inválido'},
                 status=status.HTTP_404_NOT_FOUND
             )
 
         if dynamic_code.status != 'Disponible':
             return Response(
-                {'error': 'El código dinámico ya fue usado o no está disponible'},
+                {'error': 'Código usado'},
                 status=status.HTTP_400_BAD_REQUEST
             )
 
