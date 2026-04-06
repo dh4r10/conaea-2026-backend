@@ -281,6 +281,16 @@ class VerifyCodeView(APIView):
                     status=status.HTTP_404_NOT_FOUND
                 )
 
+            # Obtener monto de la preventa activa
+            now = timezone.now()
+            slot = AvailableSlot.objects.filter(
+                pre_sale__start_date__lte=now,
+                pre_sale__end_date__gte=now,
+                pre_sale__is_active=True,
+                quota_type=university.quota_type,
+                is_active=True,
+            ).select_related('pre_sale').first()
+
             return Response({
                 'valid': True,
                 'university_type': 'Referido',
@@ -290,6 +300,9 @@ class VerifyCodeView(APIView):
                 'region': university.region,
                 'place': university.place,
                 'quota_type_id': university.quota_type.id,
+                'quota_type_name': university.quota_type.name,
+                'currency': university.quota_type.currency,
+                'mount': str(slot.mount) if slot else None,
             }, status=status.HTTP_200_OK)
 
         # ── Caso General ───────────────────────────────────────────────
@@ -309,10 +322,22 @@ class VerifyCodeView(APIView):
                 status=status.HTTP_400_BAD_REQUEST
             )
 
+        now = timezone.now()
+        slot = AvailableSlot.objects.filter(
+            pre_sale__start_date__lte=now,
+            pre_sale__end_date__gte=now,
+            pre_sale__is_active=True,
+            quota_type=dynamic_code.quota_type,
+            is_active=True,
+        ).select_related('pre_sale').first()
+
         return Response({
             'valid': True,
             'university_type': 'General',
             'quota_type_id': dynamic_code.quota_type.id,
+            'quota_type_name': dynamic_code.quota_type.name,
+            'currency': dynamic_code.quota_type.currency,
+            'mount': str(slot.mount) if slot else None,
         }, status=status.HTTP_200_OK)
 
 
