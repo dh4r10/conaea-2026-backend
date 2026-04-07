@@ -212,8 +212,11 @@ class ParticipantValidationSerializer(serializers.Serializer):
         return value.strip()
 
     def validate_identity_document(self, value):
-        if not value.isdigit():
+        document_type = self.initial_data.get('document_type', '')
+        
+        if document_type == 'DNI' and not value.isdigit():
             raise serializers.ValidationError('Solo se permiten números')
+        
         return value
 
     def validate_archive(self, value):
