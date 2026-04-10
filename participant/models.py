@@ -39,6 +39,7 @@ class Participant(models.Model):
     birthday = models.DateField()
     identity_document = models.CharField(max_length=10, unique=True)
     document_type = models.CharField(max_length=20)
+    cellphone = models.CharField(max_length=20)
     email = models.EmailField(max_length=255, unique=True)
     cod_country = models.IntegerField()
     cod_university = models.CharField(max_length=5)
@@ -111,6 +112,7 @@ class Enrollment(models.Model):
     class Meta:
         db_table = 'enrollments'
 
+
 class PartnerUniversity(models.Model):
     id = models.BigAutoField(primary_key=True)
 
@@ -148,7 +150,8 @@ class PartnerUniversity(models.Model):
 
     class Meta:
         db_table = 'partner_universities'
-        
+
+
 class Delegate(models.Model):
     partner_university = models.ForeignKey(
         PartnerUniversity,

@@ -7,6 +7,7 @@ from rest_framework.parsers import MultiPartParser, FormParser
 from .models import SpecialCondition, Participant, ParticipantSpecialCondition, Enrollment, PartnerUniversity, Delegate
 from register.models import AvailableSlot
 from .serializers import (
+    ParticipantTableSerializer,
     SpecialConditionSerializer,
     ParticipantSerializer,
     ParticipantDetailSerializer,
@@ -18,6 +19,8 @@ from .serializers import (
     DelegateSerializer,
 )
 from .pagination import StandardPagination
+from django.db.models import Q, Value
+from django.db.models.functions import Concat
 
 class SpecialConditionViewSet(viewsets.ModelViewSet):
     queryset = SpecialCondition.objects.filter(is_active=True)
@@ -97,7 +100,8 @@ class EnrollmentViewSet(viewsets.ModelViewSet):
         if participant_id:
             queryset = queryset.filter(participant_id=participant_id)
         return queryset
-    
+
+
 class PartnerUniversityViewSet(viewsets.ModelViewSet):
     queryset = PartnerUniversity.objects.filter(is_active=True).select_related('quota_type')
     permission_classes = [permissions.IsAuthenticated]
@@ -124,7 +128,8 @@ class PartnerUniversityViewSet(viewsets.ModelViewSet):
         delegates = university.delegates.filter(is_active=True)
         serializer = DelegateSerializer(delegates, many=True)
         return Response(serializer.data)
-    
+
+
 class DelegateViewSet(viewsets.ModelViewSet):
     queryset = Delegate.objects.filter(is_active=True).select_related('partner_university')
     serializer_class = DelegateSerializer
@@ -139,6 +144,7 @@ class DelegateViewSet(viewsets.ModelViewSet):
             queryset = queryset.filter(partner_university_id=partner_university_id)
 
         return queryset
+
 
 class ParticipantValidationView(APIView):
     permission_classes = [permissions.AllowAny]
@@ -157,7 +163,8 @@ class ParticipantValidationView(APIView):
             serializer.errors,
             status=status.HTTP_400_BAD_REQUEST
         )
-    
+
+
 class ParticipantByDNIView(APIView):
     permission_classes = [permissions.AllowAny]
 
@@ -203,3 +210,80 @@ class ParticipantByDNIView(APIView):
             'currency': participant.registration.quota_type.currency,
             'mount': mount,
         }, status=status.HTTP_200_OK)
+    
+
+# participant/views.py
+
+class ParticipantTableView(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+    pagination_class = StandardPagination
+
+    def get(self, request):
+        qs = Participant.objects.filter(is_active=True).select_related(
+            'registration__quota_type',
+            'registration__pre_sale',
+        )
+
+        # ── Filtros ───────────────────────────────────────────────
+        pre_sale_id = request.query_params.get('pre_sale_id')
+        document_type = request.query_params.get('document_type')
+        quota_type_id = request.query_params.get('quota_type_id')
+        university_type = request.query_params.get('university_type')
+        university_code = request.query_params.get('university_code')
+        search = request.query_params.get('search', '').strip()
+        
+
+        if pre_sale_id:
+            qs = qs.filter(registration__pre_sale_id=pre_sale_id)
+        if document_type:
+            qs = qs.filter(document_type=document_type)
+        if quota_type_id:
+            qs = qs.filter(registration__quota_type_id=quota_type_id)
+        if university_type:
+            qs = qs.filter(university_type=university_type)
+        if university_code:
+            qs = qs.filter(cod_university=university_code)
+        if search:
+            qs = qs.annotate(
+                    full_name=Concat(
+                        'first_name', Value(' '),
+                        'paternal_surname', Value(' '),
+                        'maternal_surname',
+                    )
+                )
+            
+            qs = qs.filter(
+                    Q(full_name__icontains=search) |
+                    Q(identity_document__icontains=search) |
+                    Q(email__icontains=search) |
+                    Q(cod_university__icontains=search) |
+                    Q(cod_university__in=PartnerUniversity.objects.filter(
+                        name__icontains=search, is_active=True
+                    ).values_list('code', flat=True))
+                )
+
+        # ── Paginación ────────────────────────────────────────────
+        paginator = StandardPagination()
+        page = paginator.paginate_queryset(qs, request)
+
+        # ── Precargar universidades Referido para evitar N+1 ──────
+        referido_codes = {
+            p.cod_university for p in page
+            if p.university_type == 'Referido'
+        }
+        universities = {}
+        if referido_codes:
+            universities = {
+                u.code: u
+                for u in PartnerUniversity.objects.filter(
+                    code__in=referido_codes,
+                    is_active=True
+                )
+            }
+
+        serializer = ParticipantTableSerializer(
+            page,
+            many=True,
+            context={'universities': universities}
+        )
+        return paginator.get_paginated_response(serializer.data)

@@ -172,6 +172,9 @@ class TransactionViewSet(viewsets.ModelViewSet):
             )
         return super().create(request, *args, **kwargs)
 
+    def perform_create(self, serializer):
+        serializer.save(is_active=True)
+
 
 class RefundViewSet(viewsets.ModelViewSet):
     queryset = Refund.objects.filter(is_active=True)
@@ -520,18 +523,19 @@ class InscriptionView(APIView):
         # ── 9. Crear Participant ──────────────────────────────────────
         participant = Participant.objects.create(
             registration=registration,
-            photograph=photograph,          # 👈
+            photograph=photograph,
             first_name=data.get('first_name', '').strip(),
             paternal_surname=data.get('paternal_surname', '').strip(),
             maternal_surname=data.get('maternal_surname', '').strip(),
             birthday=data.get('birthdate'),
             identity_document=identity_document,
             document_type=data.get('document_type', '').strip(),
+            cellphone=serializer.validated_data.get('cellphone', ''),
             email=email,
             cod_country=cod_country,
             cod_university=cod_university,
             university_type=university_type,
-            academic_cycle=data.get('academic_cycle', '0').strip() if university_type == 'Referido' else '0',  # 👈
+            academic_cycle=data.get('academic_cycle', '0').strip() if university_type == 'Referido' else '0',
         )
 
         # ── 10. Crear Enrollment (ficha de matrícula) ─────────────────

@@ -1,4 +1,6 @@
 import re
+import phonenumbers
+from phonenumbers import NumberParseException
 from rest_framework import serializers
 from .models import SpecialCondition, Participant, ParticipantSpecialCondition, Enrollment, PartnerUniversity, Delegate
 from register.serializers import QuotaTypeSerializer
@@ -133,6 +135,14 @@ class ParticipantValidationSerializer(serializers.Serializer):
             'required': 'Este campo es requerido',
         }
     )
+    cellphone = serializers.CharField(
+        max_length=20,
+        error_messages={
+            'blank': 'Este campo no puede estar vacío',
+            'required': 'Este campo es requerido',
+            'max_length': 'Máximo 20 caracteres'
+        }
+    )
     email = serializers.EmailField(
         max_length=255,
         error_messages={
@@ -225,6 +235,37 @@ class ParticipantValidationSerializer(serializers.Serializer):
         if value.size > 300 * 1024:
             raise serializers.ValidationError('El archivo no debe superar los 300 KB')
         return value
+    
+    def validate_cellphone(self, value):
+        """
+        Valida el número telefónico y lo formatea como:
+        (+CC) NNNNNNNNN
+        Ejemplo: (+51) 987654321
+        """
+        if not value:
+            raise serializers.ValidationError('Este campo es requerido')
+
+        # Acepta formatos como +51-987654321 o +51987654321
+        normalized = value.replace('-', '').replace(' ', '')
+
+        try:
+            parsed = phonenumbers.parse(normalized, None)
+        except NumberParseException:
+            raise serializers.ValidationError('Número de teléfono inválido')
+
+        if not phonenumbers.is_valid_number(parsed):
+            raise serializers.ValidationError(
+                'Número de teléfono inválido para el país indicado'
+            )
+
+        # Obtener código de país y número nacional
+        country_code = parsed.country_code
+        national_number = parsed.national_number
+
+        # Formato personalizado con paréntesis
+        formatted_number = f"(+{country_code}){national_number}"
+
+        return formatted_number
 
     # ── Validaciones cruzadas ──────────────────────────────────────────
 
@@ -243,3 +284,39 @@ class ParticipantValidationSerializer(serializers.Serializer):
 
         return data
     
+
+class ParticipantTableSerializer(serializers.ModelSerializer):
+    full_name = serializers.SerializerMethodField()
+    university_name = serializers.SerializerMethodField()
+    quota_type = serializers.SerializerMethodField()
+    pre_sale = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Participant
+        fields = [
+            'id',
+            'document_type',
+            'identity_document',
+            'photograph',
+            'full_name',
+            'university_type',
+            'university_name',
+            'cellphone',
+            'quota_type',
+            'pre_sale',
+        ]
+
+    def get_full_name(self, obj):
+        return f"{obj.first_name} {obj.paternal_surname} {obj.maternal_surname}"
+
+    def get_university_name(self, obj):
+        if obj.university_type == 'Referido':
+            university = self.context.get('universities', {}).get(obj.cod_university)
+            return university.name if university else obj.cod_university
+        return obj.cod_university  # General: muestra el ID tal cual
+
+    def get_quota_type(self, obj):
+        return obj.registration.quota_type.name
+
+    def get_pre_sale(self, obj):
+        return obj.registration.pre_sale.name
