@@ -8,7 +8,7 @@ from .serializers import (
     ValidationSerializer,
     ValidationDetailSerializer
 )
-from rest_framework import viewsets, permissions
+from rest_framework import viewsets, permissions, status
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework import status
@@ -21,6 +21,7 @@ class PersonalDataViewSet(viewsets.ModelViewSet):
         permissions.IsAdminUser
     ]
     serializer_class = PersonalDataSerializer
+
 
 class UserViewSet(viewsets.ModelViewSet):
     queryset = User.objects.all()
@@ -102,7 +103,103 @@ class UserViewSet(viewsets.ModelViewSet):
             ],
             'groups_count': groups.count()
         })
-    
+
+
+class ValidationAdminViewSet(viewsets.ViewSet):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def _toggle(self, request, model_name, register_id):
+        """Crea o elimina una validación para el modelo y registro dado."""
+        user = request.user
+        existing = Validation.objects.filter(
+            model=model_name,
+            register_id=register_id
+        ).first()
+
+        if existing:
+            existing.delete()
+            return Response({'validated': False}, status=status.HTTP_200_OK)
+        else:
+            # No existe → crear
+            Validation.objects.create(
+                user=user,
+                model=model_name,
+                register_id=register_id,
+                validated=True,
+            )
+            return Response({'validated': True}, status=status.HTTP_201_CREATED)
+
+    @action(detail=False, methods=['post'], url_path='enrollment/(?P<register_id>[0-9]+)')
+    def enrollment(self, request, register_id=None):
+        """
+        POST /api/auth/validation/enrollment/{enrollment_id}/
+        Valida o desvalida una ficha de matrícula.
+        """
+        return self._toggle(request, 'enrollment', int(register_id))
+
+    @action(detail=False, methods=['post'], url_path='transaction/(?P<register_id>[0-9]+)')
+    def transaction(self, request, register_id=None):
+        """
+        POST /api/auth/validation/transaction/{transaction_id}/
+        Valida o desvalida una transacción.
+        """
+        return self._toggle(request, 'transaction', int(register_id))
+
+    @action(detail=False, methods=['post'], url_path='registration/(?P<participant_id>[0-9]+)')
+    def registration(self, request, participant_id=None):
+        from participant.models import Participant, Enrollment
+        from register.models import Transaction
+
+        try:
+            participant = Participant.objects.get(pk=participant_id, is_active=True)
+        except Participant.DoesNotExist:
+            return Response(
+                {'detail': 'Participante no encontrado.'},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        if not participant.registration_id:
+            return Response(
+                {'detail': 'El participante no tiene registro asociado.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # Verificar que todos los enrollments activos estén validados
+        enrollment_ids = Enrollment.objects.filter(
+            participant=participant,
+            is_active=True,
+        ).values_list('id', flat=True)
+
+        validated_enrollments = Validation.objects.filter(
+            model='enrollment',
+            register_id__in=enrollment_ids,
+        ).count()
+
+        if validated_enrollments < len(enrollment_ids):
+            return Response(
+                {'detail': 'No todos los enrollments están validados.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # Verificar que todas las transactions activas estén validadas
+        transaction_ids = Transaction.objects.filter(
+            registration_id=participant.registration_id,
+            is_active=True,
+        ).values_list('id', flat=True)
+
+        validated_transactions = Validation.objects.filter(
+            model='transaction',
+            register_id__in=transaction_ids,
+        ).count()
+
+        if validated_transactions < len(transaction_ids):
+            return Response(
+                {'detail': 'No todas las transacciones están validadas.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        return self._toggle(request, 'registration', participant.registration_id)
+
 # PUBLIC VIEW
 
 class RegisterUserView(APIView):

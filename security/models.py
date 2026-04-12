@@ -39,7 +39,8 @@ class Validation(models.Model):
     )
     model = models.CharField(max_length=20, choices=MODEL_CHOICES)
     register_id = models.IntegerField()
-    validated = models.BooleanField(default=True)
+    validated = models.BooleanField(default=False)
+    created_at = models.DateTimeField(auto_now_add=True, null=True, blank=True)
     is_active = models.BooleanField(default=True)
 
     def __str__(self):

@@ -293,6 +293,7 @@ class ParticipantTableSerializer(serializers.ModelSerializer):
     pre_sale = serializers.SerializerMethodField()
     vouchers = serializers.SerializerMethodField()
     enrollments = serializers.SerializerMethodField()
+    is_validated = serializers.SerializerMethodField()
 
     class Meta:
         model = Participant
@@ -309,6 +310,7 @@ class ParticipantTableSerializer(serializers.ModelSerializer):
             'pre_sale',
             'vouchers',
             'enrollments',
+            'is_validated', 
         ]
 
     def get_full_name(self, obj):
@@ -328,6 +330,7 @@ class ParticipantTableSerializer(serializers.ModelSerializer):
 
     def get_vouchers(self, obj):
         request = self.context.get('request')
+        validations = self.context.get('validations', set())  # 👈
         transactions = Transaction.objects.filter(
             registration=obj.registration,
             is_active=True
@@ -335,8 +338,6 @@ class ParticipantTableSerializer(serializers.ModelSerializer):
         result = []
         for t in transactions:
             voucher_url = t.voucher.url if t.voucher else None
-            # voucher.url ya devuelve la URL absoluta si usas Cloudinary,
-            # o la ruta relativa si usas almacenamiento local
             if voucher_url and not voucher_url.startswith('http') and request:
                 voucher_url = request.build_absolute_uri(voucher_url)
             result.append({
@@ -344,12 +345,15 @@ class ParticipantTableSerializer(serializers.ModelSerializer):
                 'payment_method': t.payment_method,
                 'mount': str(t.mount),
                 'voucher': voucher_url,
+                'payment_date': t.payment_date,
                 'created_at': t.created_at,
+                'is_validated': ('transaction', t.id) in validations,  # 👈
             })
         return result
 
     def get_enrollments(self, obj):
         request = self.context.get('request')
+        validations = self.context.get('validations', set())  # 👈
         enrollments = Enrollment.objects.filter(
             participant=obj,
             is_active=True
@@ -363,5 +367,15 @@ class ParticipantTableSerializer(serializers.ModelSerializer):
                 'id': e.id,
                 'type': e.type,
                 'archive': archive_url,
+                'is_validated': ('enrollment', e.id) in validations,  # 👈
             })
         return result
+    
+    def get_is_validated(self, obj):
+        validations = self.context.get('validations', set())  # 👈
+        registration_id = obj.registration.id if obj.registration else None
+        if not registration_id:
+            return False
+        return ('registration', registration_id) in validations
+    
+

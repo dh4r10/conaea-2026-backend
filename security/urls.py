@@ -1,4 +1,4 @@
-from .views import PersonalDataViewSet, UserViewSet, RegisterUserView, ValidationViewSet, ChangePasswordView
+from .views import PersonalDataViewSet, UserViewSet, RegisterUserView, ValidationViewSet, ValidationAdminViewSet, ChangePasswordView
 from rest_framework import routers
 from rest_framework_simplejwt.views import (
     TokenObtainPairView,
@@ -11,6 +11,7 @@ router = routers.DefaultRouter()
 router.register('personal-data', PersonalDataViewSet, basename='personal_data')
 router.register('user', UserViewSet, basename='user')
 router.register('validation', ValidationViewSet, basename='validation')
+router.register('validation-admin', ValidationAdminViewSet, basename='validation_admin')
 
 urlpatterns = [
     path('security/', include(router.urls)),

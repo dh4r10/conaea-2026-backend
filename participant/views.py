@@ -165,30 +165,53 @@ class ParticipantValidationView(APIView):
         )
 
 
-class ParticipantByDNIView(APIView):
+class ParticipantByIdentityView(APIView):
     permission_classes = [permissions.AllowAny]
 
     def get(self, request):
-        dni = request.query_params.get('dni', '').strip()
+        document = request.query_params.get('document', '').strip()
+        document_type = request.query_params.get('document_type', 'DNI').strip().upper()
 
-        if not dni:
+        if not document:
             return Response(
-                {'error': 'El DNI es requerido'},
+                {'error': 'El documento es requerido'},
                 status=status.HTTP_400_BAD_REQUEST
             )
+
+        if document_type not in ('DNI', 'PASAPORTE'):
+            return Response(
+                {'error': 'El tipo de documento debe ser DNI o PASAPORTE'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        if document_type == 'DNI':
+            if not document.isdigit() or len(document) != 8:
+                return Response(
+                    {'error': 'El DNI debe tener exactamente 8 dígitos numéricos'},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+        elif document_type == 'PASAPORTE':
+            if not document.isalnum() or len(document) > 11:
+                return Response(
+                    {'error': 'El pasaporte debe ser alfanumérico y tener como máximo 11 caracteres'},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
 
         try:
             participant = Participant.objects.select_related(
                 'registration__quota_type',
                 'registration__pre_sale',
-            ).get(identity_document=dni, is_active=True)
+            ).get(
+                identity_document=document,
+                document_type=document_type,
+                is_active=True,
+            )
         except Participant.DoesNotExist:
             return Response(
-                {'error': 'No se encontró ningún participante con ese DNI'},
+                {'error': 'No se encontró ningún participante con ese documento'},
                 status=status.HTTP_404_NOT_FOUND
             )
 
-        # Obtener monto desde available_slot
         try:
             slot = AvailableSlot.objects.get(
                 pre_sale=participant.registration.pre_sale,
@@ -225,6 +248,12 @@ class ParticipantTableView(APIView):
         ).prefetch_related(
             'enrollment_set',                    # 👈
             'registration__transaction_set',     # 👈
+        )
+        
+        from security.models import Validation
+
+        validations = set(
+            Validation.objects.values_list('model', 'register_id')
         )
 
         # ── Filtros ───────────────────────────────────────────────
@@ -289,8 +318,10 @@ class ParticipantTableView(APIView):
             many=True,
             context={
                 'universities': universities,
-                'request': request,  # 👈
+                'request': request,
+                'validations': validations,  # 👈
             }
         )
         
         return paginator.get_paginated_response(serializer.data)
+    

@@ -9,7 +9,7 @@ from .views import (
     ParticipantValidationView,
     PartnerUniversityViewSet,
     DelegateViewSet,
-    ParticipantByDNIView
+    ParticipantByIdentityView
 )
 
 router = routers.DefaultRouter()
@@ -24,6 +24,6 @@ router.register('delegates', DelegateViewSet, basename='delegate')
 urlpatterns = [
     path('participants/', include(router.urls)),
     path('participants/validate/', ParticipantValidationView.as_view(), name='participant_validate'),
-    path('participants/by-dni/', ParticipantByDNIView.as_view(), name='participant_by_dni'),
+    path('participants/by-identity/', ParticipantByIdentityView.as_view(), name='participant_by_identity'),
     path('participants/table/', ParticipantTableView.as_view(), name='participant-table'),
 ]
