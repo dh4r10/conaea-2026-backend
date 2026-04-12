@@ -1,6 +1,7 @@
 from django.urls import path, include
 from rest_framework import routers
 from .views import (
+    ParticipantStatsView,
     ParticipantTableView,
     SpecialConditionViewSet,
     ParticipantViewSet,
@@ -26,4 +27,5 @@ urlpatterns = [
     path('participants/validate/', ParticipantValidationView.as_view(), name='participant_validate'),
     path('participants/by-identity/', ParticipantByIdentityView.as_view(), name='participant_by_identity'),
     path('participants/table/', ParticipantTableView.as_view(), name='participant-table'),
+    path('participants/stats/', ParticipantStatsView.as_view(), name='participant_stats'),
 ]

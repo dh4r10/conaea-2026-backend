@@ -5,6 +5,7 @@ from rest_framework.response import Response
 from rest_framework.parsers import MultiPartParser, FormParser
 
 from .models import SpecialCondition, Participant, ParticipantSpecialCondition, Enrollment, PartnerUniversity, Delegate
+from security.models import Validation
 from register.models import AvailableSlot
 from .serializers import (
     ParticipantTableSerializer,
@@ -21,6 +22,7 @@ from .serializers import (
 from .pagination import StandardPagination
 from django.db.models import Q, Value
 from django.db.models.functions import Concat
+
 
 class SpecialConditionViewSet(viewsets.ModelViewSet):
     queryset = SpecialCondition.objects.filter(is_active=True)
@@ -234,6 +236,27 @@ class ParticipantByIdentityView(APIView):
             'mount': mount,
         }, status=status.HTTP_200_OK)
     
+# views.py
+class ParticipantStatsView(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request):
+        total = Participant.objects.filter(is_active=True).count()
+        
+        validated_ids = Validation.objects.filter(
+            model='registration',
+        ).values_list('register_id', flat=True)
+
+        validated = Participant.objects.filter(
+            is_active=True,
+            registration_id__in=validated_ids,
+        ).count()
+
+        return Response({
+            'total': total,
+            'validated': validated,
+            'pending': total - validated,
+        })
 
 # participant/views.py
 
