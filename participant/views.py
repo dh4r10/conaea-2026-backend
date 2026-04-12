@@ -222,6 +222,9 @@ class ParticipantTableView(APIView):
         qs = Participant.objects.filter(is_active=True).select_related(
             'registration__quota_type',
             'registration__pre_sale',
+        ).prefetch_related(
+            'enrollment_set',                    # 👈
+            'registration__transaction_set',     # 👈
         )
 
         # ── Filtros ───────────────────────────────────────────────
@@ -284,6 +287,10 @@ class ParticipantTableView(APIView):
         serializer = ParticipantTableSerializer(
             page,
             many=True,
-            context={'universities': universities}
+            context={
+                'universities': universities,
+                'request': request,  # 👈
+            }
         )
+        
         return paginator.get_paginated_response(serializer.data)

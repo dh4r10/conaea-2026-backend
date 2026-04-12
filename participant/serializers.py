@@ -3,6 +3,7 @@ import phonenumbers
 from phonenumbers import NumberParseException
 from rest_framework import serializers
 from .models import SpecialCondition, Participant, ParticipantSpecialCondition, Enrollment, PartnerUniversity, Delegate
+from register.models import Transaction
 from register.serializers import QuotaTypeSerializer
 
 
@@ -290,6 +291,8 @@ class ParticipantTableSerializer(serializers.ModelSerializer):
     university_name = serializers.SerializerMethodField()
     quota_type = serializers.SerializerMethodField()
     pre_sale = serializers.SerializerMethodField()
+    vouchers = serializers.SerializerMethodField()
+    enrollments = serializers.SerializerMethodField()
 
     class Meta:
         model = Participant
@@ -304,6 +307,8 @@ class ParticipantTableSerializer(serializers.ModelSerializer):
             'cellphone',
             'quota_type',
             'pre_sale',
+            'vouchers',
+            'enrollments',
         ]
 
     def get_full_name(self, obj):
@@ -313,10 +318,50 @@ class ParticipantTableSerializer(serializers.ModelSerializer):
         if obj.university_type == 'Referido':
             university = self.context.get('universities', {}).get(obj.cod_university)
             return university.name if university else obj.cod_university
-        return obj.cod_university  # General: muestra el ID tal cual
+        return obj.cod_university
 
     def get_quota_type(self, obj):
         return obj.registration.quota_type.name
 
     def get_pre_sale(self, obj):
         return obj.registration.pre_sale.name
+
+    def get_vouchers(self, obj):
+        request = self.context.get('request')
+        transactions = Transaction.objects.filter(
+            registration=obj.registration,
+            is_active=True
+        )
+        result = []
+        for t in transactions:
+            voucher_url = t.voucher.url if t.voucher else None
+            # voucher.url ya devuelve la URL absoluta si usas Cloudinary,
+            # o la ruta relativa si usas almacenamiento local
+            if voucher_url and not voucher_url.startswith('http') and request:
+                voucher_url = request.build_absolute_uri(voucher_url)
+            result.append({
+                'id': t.id,
+                'payment_method': t.payment_method,
+                'mount': str(t.mount),
+                'voucher': voucher_url,
+                'created_at': t.created_at,
+            })
+        return result
+
+    def get_enrollments(self, obj):
+        request = self.context.get('request')
+        enrollments = Enrollment.objects.filter(
+            participant=obj,
+            is_active=True
+        )
+        result = []
+        for e in enrollments:
+            archive_url = e.archive.url if e.archive else None
+            if archive_url and not archive_url.startswith('http') and request:
+                archive_url = request.build_absolute_uri(archive_url)
+            result.append({
+                'id': e.id,
+                'type': e.type,
+                'archive': archive_url,
+            })
+        return result
