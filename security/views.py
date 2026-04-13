@@ -11,7 +11,12 @@ from .serializers import (
 from rest_framework import viewsets, permissions, status
 from rest_framework.decorators import action
 from rest_framework.response import Response
+from django.conf import settings
 from rest_framework import status
+
+from .email_service import send_welcome_email
+from .models import EmailLog
+from django.utils import timezone
 
 # Create your views here.
 
@@ -106,27 +111,64 @@ class UserViewSet(viewsets.ModelViewSet):
 
 
 class ValidationAdminViewSet(viewsets.ViewSet):
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [permissions.AllowAny]
 
     def _toggle(self, request, model_name, register_id):
-        """Crea o elimina una validación para el modelo y registro dado."""
         user = request.user
         existing = Validation.objects.filter(
             model=model_name,
-            register_id=register_id
+            register_id=register_id,
         ).first()
 
         if existing:
             existing.delete()
             return Response({'validated': False}, status=status.HTTP_200_OK)
         else:
-            # No existe → crear
             Validation.objects.create(
                 user=user,
                 model=model_name,
                 register_id=register_id,
                 validated=True,
             )
+
+            # 👈 Enviar email solo si es validación de registration
+            if model_name == 'registration':
+                from participant.models import Participant
+
+                participant = None
+                try:
+                    participant = Participant.objects.select_related(
+                        'registration__quota_type',
+                        'registration__pre_sale',
+                    ).get(
+                        registration_id=register_id,
+                        is_active=True
+                    )
+
+                    # ✅ Verificar si el envío de correos está habilitado
+                    if settings.AVAILABLE_EMAILS:
+                        send_welcome_email(participant)
+                        email_status = 'sent'
+                        error_message = None
+                    else:
+                        email_status = 'disabled'
+                        error_message = 'El envío de correos está deshabilitado por configuración.'
+
+                except Exception as e:
+                    email_status = 'failed'
+                    error_message = str(e)
+
+                # Registrar el resultado en EmailLog si existe el participante
+                if participant:
+                    EmailLog.objects.create(
+                        participant=participant,
+                        subject='¡Bienvenido al XXXII CONAEA Tarapoto 2026!',
+                        email_type='validation',
+                        status=email_status,
+                        error_message=error_message,
+                        sent_at=timezone.now() if email_status == 'sent' else None,
+                    )
+
             return Response({'validated': True}, status=status.HTTP_201_CREATED)
 
     @action(detail=False, methods=['post'], url_path='enrollment/(?P<register_id>[0-9]+)')
@@ -199,7 +241,6 @@ class ValidationAdminViewSet(viewsets.ViewSet):
             )
 
         return self._toggle(request, 'registration', participant.registration_id)
-
 # PUBLIC VIEW
 
 class RegisterUserView(APIView):

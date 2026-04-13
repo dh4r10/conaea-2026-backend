@@ -1,8 +1,9 @@
-from .models import PersonalData, User, Validation
+from .models import PersonalData, User, Validation, EmailLog
 from django.contrib.auth.models import Group
 from rest_framework import serializers
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
 from django.db import transaction
+
 
 class MyTokenObtainPairSerializer(TokenObtainPairSerializer):
     @classmethod
@@ -24,7 +25,8 @@ class MyTokenObtainPairSerializer(TokenObtainPairSerializer):
             token['paternal_surname'] = user.personal_data_id.paternal_surname
 
         return token
-    
+
+
 class PersonalDataSerializer(serializers.ModelSerializer):
     class Meta:
         model = PersonalData
@@ -34,6 +36,7 @@ class PersonalDataSerializer(serializers.ModelSerializer):
         if PersonalData.objects.filter(dni=value).exists():
             raise serializers.ValidationError("El DNI ya está registrado")
         return value
+
 
 class UserSerializer(serializers.ModelSerializer):
     class Meta:
@@ -55,12 +58,14 @@ class UserSerializer(serializers.ModelSerializer):
         user.save()
         return user
 
+
 class GroupSerializer(serializers.ModelSerializer):
     """Serializer para grupos"""
     
     class Meta:
         model = Group
         fields = ['id', 'name']
+
 
 class UserPermissionsSerializer(serializers.ModelSerializer):
     personal_data = PersonalDataSerializer(source='personal_data_id', read_only=True)
@@ -90,6 +95,7 @@ class UserPermissionsSerializer(serializers.ModelSerializer):
         
         return list(perms)
 
+
 class ValidationSerializer(serializers.ModelSerializer):
     class Meta:
         model = Validation
@@ -102,6 +108,42 @@ class ValidationDetailSerializer(serializers.ModelSerializer):
     class Meta:
         model = Validation
         fields = '__all__'
+
+
+class EmailLogSerializer(serializers.ModelSerializer):
+    participant_name = serializers.SerializerMethodField()
+    participant_email = serializers.SerializerMethodField()
+    email_type_display = serializers.CharField(
+        source='get_email_type_display', read_only=True
+    )
+    status_display = serializers.CharField(
+        source='get_status_display', read_only=True
+    )
+
+    class Meta:
+        model = EmailLog
+        fields = [
+            'id',
+            'participant',
+            'participant_name',
+            'participant_email',
+            'subject',
+            'email_type',
+            'email_type_display',
+            'status',
+            'status_display',
+            'error_message',
+            'sent_at',
+            'created_at',
+        ]
+
+    def get_participant_name(self, obj):
+        p = obj.participant
+        return f"{p.first_name} {p.paternal_surname} {p.maternal_surname}"
+
+    def get_participant_email(self, obj):
+        return obj.participant.email
+
 
 # PUBLIC REGISTER
 

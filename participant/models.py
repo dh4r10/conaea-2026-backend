@@ -73,6 +73,7 @@ class Participant(models.Model):
 
     class Meta:
         db_table = 'participants'
+        ordering = ['-id']
 
 
 class ParticipantSpecialCondition(models.Model):

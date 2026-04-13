@@ -17,6 +17,7 @@ class PersonalData(models.Model):
     class Meta:
         db_table = 'personal_data'
 
+
 class User(AbstractUser):
     username = models.CharField(max_length=50, unique=True)
     email = models.EmailField(unique=True)
@@ -24,6 +25,7 @@ class User(AbstractUser):
 
     first_name = None
     last_name = None
+
 
 class Validation(models.Model):
     MODEL_CHOICES = [
@@ -49,3 +51,38 @@ class Validation(models.Model):
     class Meta:
         db_table = 'validations'
         unique_together = ('model', 'register_id')  # un registro solo se valida una vez
+
+
+class EmailLog(models.Model):
+    STATUS_CHOICES = [
+        ('sent', 'Enviado'),
+        ('failed', 'Fallido'),
+        ('pending', 'Pendiente'),
+    ]
+
+    TYPE_CHOICES = [
+        ('inscription', 'Confirmación de inscripción'),
+        ('payment', 'Confirmación de pago'),
+        ('validation', 'Validación de participante'),
+        ('reminder', 'Recordatorio'),
+        ('custom', 'Personalizado'),
+    ]
+
+    participant = models.ForeignKey(
+        'participant.Participant',
+        on_delete=models.PROTECT,
+        db_column='participant_id',
+    )
+    subject = models.CharField(max_length=200)
+    email_type = models.CharField(max_length=20, choices=TYPE_CHOICES)
+    status = models.CharField(max_length=10, choices=STATUS_CHOICES, default='pending')
+    error_message = models.TextField(null=True, blank=True)
+    sent_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return f"{self.email_type} → {self.participant} ({self.status})"
+
+    class Meta:
+        db_table = 'email_logs'
+        ordering = ['-created_at']
