@@ -251,4 +251,6 @@ EMAIL_SENDER_NAME = os.getenv(
     'CONAEA 2026'
 )
 
+EMAIL_TIMEOUT = int(os.getenv('EMAIL_TIMEOUT', 20))
+
 AVAILABLE_EMAILS = os.getenv('AVAILABLE_EMAILS', 'False').lower() == 'true'

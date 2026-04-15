@@ -5,7 +5,6 @@ from rest_framework.response import Response
 from rest_framework.parsers import MultiPartParser, FormParser
 from django.db import transaction as db_transaction
 from rest_framework.views import APIView
-from django.db.models import Sum
 from .models import PreSale, QuotaType, AvailableSlot, Registration, Transaction, Refund, DynamicCode
 from participant.models import Participant
 from participant.models import Enrollment
@@ -22,9 +21,10 @@ from .serializers import (
     DynamicCodeSerializer,
     DynamicCodeDetailSerializer
 )
-from participant.serializers import ParticipantSerializer, ParticipantValidationSerializer
+from participant.serializers import ParticipantValidationSerializer
 from participant.models import PartnerUniversity, ParticipantSpecialCondition
 from .pagination import StandardPagination
+
 import random
 import string
 

@@ -14,9 +14,10 @@ from rest_framework.response import Response
 from django.conf import settings
 from rest_framework import status
 
-from .email_service import send_welcome_email
 from .models import EmailLog
 from django.utils import timezone
+
+from .email_service import send_welcome_email
 
 # Create your views here.
 
@@ -147,7 +148,10 @@ class ValidationAdminViewSet(viewsets.ViewSet):
 
                     # ✅ Verificar si el envío de correos está habilitado
                     if settings.AVAILABLE_EMAILS:
-                        send_welcome_email(participant)
+                        import threading
+                        hilo = threading.Thread(target=send_welcome_email, args=(participant,))
+                        hilo.daemon = True
+                        hilo.start()
                         email_status = 'sent'
                         error_message = None
                     else:
