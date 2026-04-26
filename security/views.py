@@ -204,61 +204,6 @@ class ValidationAdminViewSet(viewsets.ViewSet):
         """
         return self._toggle(request, 'transaction', int(register_id))
 
-    # @action(detail=False, methods=['post'], url_path='registration/(?P<participant_id>[0-9]+)')
-    # def registration(self, request, participant_id=None):
-    #     from participant.models import Participant, Enrollment
-    #     from register.models import Transaction
-
-    #     try:
-    #         participant = Participant.objects.get(pk=participant_id, is_active=True)
-    #     except Participant.DoesNotExist:
-    #         return Response(
-    #             {'detail': 'Participante no encontrado.'},
-    #             status=status.HTTP_404_NOT_FOUND,
-    #         )
-
-    #     if not participant.registration_id:
-    #         return Response(
-    #             {'detail': 'El participante no tiene registro asociado.'},
-    #             status=status.HTTP_400_BAD_REQUEST,
-    #         )
-
-    #     # Verificar que todos los enrollments activos estén validados
-    #     enrollment_ids = Enrollment.objects.filter(
-    #         participant=participant,
-    #         is_active=True,
-    #     ).values_list('id', flat=True)
-
-    #     validated_enrollments = Validation.objects.filter(
-    #         model='enrollment',
-    #         register_id__in=enrollment_ids,
-    #     ).count()
-
-    #     if validated_enrollments < len(enrollment_ids):
-    #         return Response(
-    #             {'detail': 'No todos los enrollments están validados.'},
-    #             status=status.HTTP_400_BAD_REQUEST,
-    #         )
-
-    #     # Verificar que todas las transactions activas estén validadas
-    #     transaction_ids = Transaction.objects.filter(
-    #         registration_id=participant.registration_id,
-    #         is_active=True,
-    #     ).values_list('id', flat=True)
-
-    #     validated_transactions = Validation.objects.filter(
-    #         model='transaction',
-    #         register_id__in=transaction_ids,
-    #     ).count()
-
-    #     if validated_transactions < len(transaction_ids):
-    #         return Response(
-    #             {'detail': 'No todas las transacciones están validadas.'},
-    #             status=status.HTTP_400_BAD_REQUEST,
-    #         )
-
-    #     return self._toggle(request, 'registration', participant.registration_id)
-
     @action(detail=False, methods=['post'], url_path='registration/(?P<participant_id>[0-9]+)')
     def registration(self, request, participant_id=None):
         from participant.models import Participant, Enrollment

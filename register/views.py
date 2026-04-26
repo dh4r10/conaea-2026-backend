@@ -496,19 +496,15 @@ class InscriptionView(APIView):
         identity_document = data.get('identity_document', '').strip()
         email = data.get('email', '').strip()
 
-        existing_participant = Participant.objects.filter(
-            identity_document=identity_document
-        ).select_related('registration').first()
+        if Participant.objects.filter(identity_document=identity_document, is_active=True).exists():
+            return Response(
+                {'identity_document': 'Ya existe un participante con este documento de identidad'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        print(f"Verificando email duplicado: {email}")
 
-        if existing_participant:
-            # Ya se inscribió (posible reintento por timeout)
-            return Response({
-                'message': 'Inscripción ya registrada previamente',
-                'registration_uuid': str(existing_participant.registration.uuid),
-                'participant_id': existing_participant.id,
-            }, status=status.HTTP_200_OK)  # No lanzar error
-
-        if Participant.objects.filter(email=email).exists():
+        if Participant.objects.filter(email=email, is_active=True).exists():
             return Response(
                 {'email': 'Ya existe un participante con este correo'},
                 status=status.HTTP_400_BAD_REQUEST
