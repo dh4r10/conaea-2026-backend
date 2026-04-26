@@ -254,3 +254,5 @@ EMAIL_SENDER_NAME = os.getenv(
 EMAIL_TIMEOUT = int(os.getenv('EMAIL_TIMEOUT', 20))
 
 AVAILABLE_EMAILS = os.getenv('AVAILABLE_EMAILS', 'False').lower() == 'true'
+
+MAILTRAP_ACCOUNT_ID = os.getenv('MAILTRAP_ACCOUNT_ID')

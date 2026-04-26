@@ -1,3 +1,5 @@
+from security.services.mailtrap_service import check_mailtrap_suppression
+
 from .models import PersonalData, User, Validation
 from rest_framework.views import APIView
 from .serializers import (
@@ -17,7 +19,7 @@ from rest_framework import status
 from .models import EmailLog
 from django.utils import timezone
 
-from .email_service import send_welcome_email
+from .services.email_service import send_welcome_email
 
 # Create your views here.
 
@@ -161,6 +163,17 @@ class ValidationAdminViewSet(viewsets.ViewSet):
                 except Exception as e:
                     email_status = 'failed'
                     error_message = str(e)
+
+                # 📌 Verificar suppressions en Mailtrap
+                if participant and participant.email and email_status == 'sent':
+                    suppression = check_mailtrap_suppression(participant.email)
+
+                    if suppression:
+                        email_status = 'bounced'
+                        esp_response = suppression.get("message_esp_response")
+                        error_message = esp_response
+                    else:
+                        email_status = 'sent'
 
                 # Registrar el resultado en EmailLog si existe el participante
                 if participant:
