@@ -261,6 +261,7 @@ class ParticipantByIdentityView(APIView):
         }, status=status.HTTP_200_OK)
     
 # views.py
+
 class ParticipantStatsView(APIView):
     permission_classes = [permissions.IsAuthenticated]
 
