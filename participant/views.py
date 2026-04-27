@@ -20,6 +20,8 @@ from .serializers import (
     DelegateSerializer,
 )
 from .pagination import StandardPagination
+
+from django.db import connection
 from django.db.models import Q, Value
 from django.db.models.functions import Concat
 
@@ -76,6 +78,28 @@ class ParticipantViewSet(viewsets.ModelViewSet):
         )
         serializer = ParticipantSpecialConditionSerializer(conditions, many=True)
         return Response(serializer.data)
+    
+    @action(detail=True, methods=['patch'], url_path='deactivate')
+    def deactivate(self, request, pk=None):
+        """
+        Desactivar participante y todos sus registros asociados
+        PATCH /api/participants/participant/{id}/deactivate/
+        """
+        participant = self.get_object()
+
+        if not participant.is_active:
+            return Response(
+                {'detail': 'Participant is already inactive'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        with connection.cursor() as cursor:
+            cursor.execute('CALL deactivate_participant(%s)', [participant.id])
+
+        return Response(
+            {'detail': 'Participante eliminado correctamente'},
+            status=status.HTTP_200_OK
+        )
 
 
 class ParticipantSpecialConditionViewSet(viewsets.ModelViewSet):
