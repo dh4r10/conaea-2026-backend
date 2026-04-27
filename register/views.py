@@ -4,7 +4,7 @@ from rest_framework import viewsets, permissions, status
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.parsers import MultiPartParser, FormParser
-from django.db import transaction as db_transaction
+from django.db import connection, transaction as db_transaction
 from rest_framework.views import APIView, View
 from .models import PreSale, QuotaType, AvailableSlot, Registration, Transaction, Refund, DynamicCode
 from participant.models import Participant
@@ -655,66 +655,73 @@ class AvailableSlotsRealTimeView(APIView):
         return Response(data)
     
 
+# def get_slots_data():
+#     slots     = AvailableSlot.objects.filter(is_active=True).select_related('quota_type')
+#     slot_map  = {slot.quota_type.name: slot for slot in slots}
+
+#     local_slot   = slot_map.get('Local')
+#     general_slot = slot_map.get('General')
+
+#     counts = Participant.objects.filter(
+#         registration__is_active=True
+#     ).aggregate(
+#         nacional=Count(
+#             Case(When(registration__quota_type_id=slot_map['Nacional'].quota_type_id, then=1), output_field=IntegerField())
+#         ),
+#         internacional=Count(
+#             Case(When(registration__quota_type_id=slot_map['Internacional'].quota_type_id, then=1), output_field=IntegerField())
+#         ),
+#         local=Count(
+#             Case(When(registration__quota_type_id=local_slot.quota_type_id, then=1), output_field=IntegerField())
+#         ),
+#         general=Count(
+#             Case(When(registration__quota_type_id=general_slot.quota_type_id, then=1), output_field=IntegerField())
+#         ),
+#     )
+
+#     shared_enrolleds = counts['local'] + counts['general']
+#     shared_amount    = general_slot.amount if general_slot else 0
+
+#     data = []
+#     for name in SLOT_ORDER:
+#         slot = slot_map.get(name)
+#         if not slot:
+#             continue
+
+#         if name == 'General':
+#             data.append({
+#                 'label': 'Local / General',
+#                 'amount': shared_amount,
+#                 'enrolleds': shared_enrolleds,
+#             })
+#         elif name == 'Nacional':
+#             data.append({
+#                 'label': name,
+#                 'amount': slot.amount,
+#                 'enrolleds': counts['nacional'],
+#             })
+#         elif name == 'Internacional':
+#             data.append({
+#                 'label': name,
+#                 'amount': slot.amount,
+#                 'enrolleds': counts['internacional'],
+#             })
+
+#     data.append({
+#         'label': 'Total',
+#         'amount': sum(s['amount'] for s in data),
+#         'enrolleds': sum(s['enrolleds'] for s in data),
+#         'highlight': True,
+#     })
+
+#     return data
+
+
 def get_slots_data():
-    slots     = AvailableSlot.objects.filter(is_active=True).select_related('quota_type')
-    slot_map  = {slot.quota_type.name: slot for slot in slots}
-
-    local_slot   = slot_map.get('Local')
-    general_slot = slot_map.get('General')
-
-    counts = Participant.objects.filter(
-        registration__is_active=True
-    ).aggregate(
-        nacional=Count(
-            Case(When(registration__quota_type_id=slot_map['Nacional'].quota_type_id, then=1), output_field=IntegerField())
-        ),
-        internacional=Count(
-            Case(When(registration__quota_type_id=slot_map['Internacional'].quota_type_id, then=1), output_field=IntegerField())
-        ),
-        local=Count(
-            Case(When(registration__quota_type_id=local_slot.quota_type_id, then=1), output_field=IntegerField())
-        ),
-        general=Count(
-            Case(When(registration__quota_type_id=general_slot.quota_type_id, then=1), output_field=IntegerField())
-        ),
-    )
-
-    shared_enrolleds = counts['local'] + counts['general']
-    shared_amount    = general_slot.amount if general_slot else 0
-
-    data = []
-    for name in SLOT_ORDER:
-        slot = slot_map.get(name)
-        if not slot:
-            continue
-
-        if name == 'General':
-            data.append({
-                'label': 'Local / General',
-                'amount': shared_amount,
-                'enrolleds': shared_enrolleds,
-            })
-        elif name == 'Nacional':
-            data.append({
-                'label': name,
-                'amount': slot.amount,
-                'enrolleds': counts['nacional'],
-            })
-        elif name == 'Internacional':
-            data.append({
-                'label': name,
-                'amount': slot.amount,
-                'enrolleds': counts['internacional'],
-            })
-
-    data.append({
-        'label': 'Total',
-        'amount': sum(s['amount'] for s in data),
-        'enrolleds': sum(s['enrolleds'] for s in data),
-        'highlight': True,
-    })
-
-    return data
+    with connection.cursor() as cursor:
+        cursor.execute('SELECT get_slots_data()')
+        row = cursor.fetchone()
+    return row[0]
 
 
 class AvailableSlotsSSEView(View):
