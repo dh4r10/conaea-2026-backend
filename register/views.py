@@ -752,11 +752,23 @@ class AvailableSlotsSSEView(View):
 
     def get(self, request):
         def event_stream():
+            # Primer envío inmediato desde cache (sin esperar DB)
+            data = get_slots_data()
+            if data is not None:
+                yield f"data: {json.dumps(data)}\n\n"
+
+            last_sent = data
+
             while True:
                 try:
-                    data = get_slots_data()
-                    yield f"data: {json.dumps(data)}\n\n"
-                    time.sleep(10)
+                    time.sleep(2)  # Poll interno ligero (solo lee cache)
+                    current = get_slots_data()
+
+                    # Solo envía si hay cambio (evita re-renders innecesarios)
+                    if current != last_sent:
+                        yield f"data: {json.dumps(current)}\n\n"
+                        last_sent = current
+
                 except GeneratorExit:
                     break
 
