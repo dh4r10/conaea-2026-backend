@@ -1,12 +1,10 @@
-import threading
-
 from django.utils import timezone
 from django.db.models import Count, Case, When, IntegerField
 from rest_framework import viewsets, permissions, status
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.parsers import MultiPartParser, FormParser
-from django.db import connection, transaction as db_transaction, close_old_connections
+from django.db import connection, transaction as db_transaction
 from rest_framework.views import APIView, View
 from .models import PreSale, QuotaType, AvailableSlot, Registration, Transaction, Refund, DynamicCode
 from participant.models import Participant
@@ -719,56 +717,22 @@ class AvailableSlotsRealTimeView(APIView):
 #     return data
 
 
-# Cache compartido entre requests SSE
-_slots_cache = {"data": None, "lock": threading.Lock()}
-
-
-def refresh_slots_cache():
-    """Corre en background thread, actualiza cache cada 10s."""
-    while True:
-        try:
-            close_old_connections()
-            with connection.cursor() as cursor:
-                cursor.execute('SELECT get_slots_data()')
-                row = cursor.fetchone()
-            with _slots_cache["lock"]:
-                _slots_cache["data"] = row[0]
-        except Exception as e:
-            print(f"[slots cache] Error: {e}")
-        time.sleep(10)
-
-
-# Inicia el thread una sola vez al arrancar
-_bg_thread = threading.Thread(target=refresh_slots_cache, daemon=True)
-_bg_thread.start()
-
-
 def get_slots_data():
-    with _slots_cache["lock"]:
-        return _slots_cache["data"]
+    with connection.cursor() as cursor:
+        cursor.execute('SELECT get_slots_data()')
+        row = cursor.fetchone()
+    return row[0]
 
 
 class AvailableSlotsSSEView(View):
 
     def get(self, request):
         def event_stream():
-            # Primer envío inmediato desde cache (sin esperar DB)
-            data = get_slots_data()
-            if data is not None:
-                yield f"data: {json.dumps(data)}\n\n"
-
-            last_sent = data
-
             while True:
                 try:
-                    time.sleep(2)  # Poll interno ligero (solo lee cache)
-                    current = get_slots_data()
-
-                    # Solo envía si hay cambio (evita re-renders innecesarios)
-                    if current != last_sent:
-                        yield f"data: {json.dumps(current)}\n\n"
-                        last_sent = current
-
+                    data = get_slots_data()
+                    yield f"data: {json.dumps(data)}\n\n"
+                    time.sleep(10)
                 except GeneratorExit:
                     break
 
