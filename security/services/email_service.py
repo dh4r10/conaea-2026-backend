@@ -7,8 +7,8 @@ import mailtrap as mt
 from django.conf import settings
 from django.core.mail import EmailMultiAlternatives
 from participant.models import PartnerUniversity
-from django.core.mail import EmailMultiAlternatives
 from email.mime.image import MIMEImage
+import urllib.request
 
 
 def get_mailtrap_client():
@@ -326,11 +326,13 @@ def send_welcome_email(participant):
     email.attach(image)
 
     # ── LOGO ──
-    logo_path = os.path.join('media/', 'logo.png')
-    with open(logo_path, 'rb') as f:
-        logo_img = MIMEImage(f.read(), _subtype='png')
-        logo_img.add_header('Content-ID', '<logo>')
-        logo_img.add_header('Content-Disposition', 'inline', filename='logo.png')
-        email.attach(logo_img)
+    logo_url = settings.LOGO_URL  # añade esta variable a tu .env
+    logo_response = urllib.request.urlopen(logo_url)
+    logo_bytes = logo_response.read()
+
+    logo_img = MIMEImage(logo_bytes, _subtype='png')
+    logo_img.add_header('Content-ID', '<logo>')
+    logo_img.add_header('Content-Disposition', 'inline', filename='logo.png')
+    email.attach(logo_img)
 
     email.send(fail_silently=False)
