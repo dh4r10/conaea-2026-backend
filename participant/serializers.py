@@ -306,6 +306,7 @@ class ParticipantTableSerializer(serializers.ModelSerializer):
             'university_type',
             'university_name',
             'cellphone',
+            'email',
             'quota_type',
             'pre_sale',
             'vouchers',

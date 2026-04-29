@@ -259,7 +259,69 @@ class ParticipantByIdentityView(APIView):
             'currency': participant.registration.quota_type.currency,
             'mount': mount,
         }, status=status.HTTP_200_OK)
-    
+
+
+class ParticipantUpdateView(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+    parser_classes = [MultiPartParser, FormParser]
+
+    def patch(self, request, pk):
+        try:
+            participant = Participant.objects.get(pk=pk, is_active=True)
+        except Participant.DoesNotExist:
+            return Response(
+                {'error': 'Participante no encontrado'},
+                status=status.HTTP_404_NOT_FOUND
+            )
+
+        data = request.data
+
+        # ── Verificar duplicados (excluyendo al mismo participante) ────
+        identity_document = data.get('identity_document', '').strip()
+        email = data.get('email', '').strip()
+
+        if identity_document and Participant.objects.filter(
+            identity_document=identity_document,
+            is_active=True
+        ).exclude(pk=pk).exists():
+            return Response(
+                {'identity_document': 'Ya existe un participante con este documento'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        if email and Participant.objects.filter(
+            email=email,
+            is_active=True
+        ).exclude(pk=pk).exists():
+            return Response(
+                {'email': 'Ya existe un participante con este correo'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        # ── Actualizar campos ──────────────────────────────────────────
+        updatable_fields = [
+            'first_name', 'paternal_surname', 'maternal_surname',
+            'birthday', 'identity_document', 'document_type',
+            'cellphone', 'email', 'academic_cycle',
+        ]
+
+        for field in updatable_fields:
+            value = data.get(field, '').strip() if isinstance(data.get(field), str) else data.get(field)
+            if value is not None and value != '':
+                setattr(participant, field, value)
+
+        # ── Foto ───────────────────────────────────────────────────────
+        photograph = request.FILES.get('photograph')
+        if photograph:
+            participant.photograph = photograph
+
+        participant.save()
+
+        return Response({
+            'message': 'Participante actualizado correctamente',
+            'participant_id': participant.id,
+        }, status=status.HTTP_200_OK)
+
 # views.py
 
 class ParticipantStatsView(APIView):

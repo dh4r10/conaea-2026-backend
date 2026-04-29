@@ -577,7 +577,6 @@ class InscriptionView(APIView):
             'participant_id': participant.id,
         }, status=status.HTTP_201_CREATED)
     
-
 SLOT_ORDER = ['Internacional', 'Nacional', 'General']
 
 class AvailableSlotsRealTimeView(APIView):
