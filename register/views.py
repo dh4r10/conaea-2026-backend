@@ -641,6 +641,8 @@ class AvailableSlotsSSEView(View):
                     time.sleep(10)
                 except GeneratorExit:
                     break
+                except Exception:
+                    break
 
         response = StreamingHttpResponse(
             event_stream(),
@@ -694,6 +696,8 @@ class IndividualCupsSSEView(View):
                     yield f"data: {json.dumps({'available_cups': available})}\n\n"
                     time.sleep(10)
                 except GeneratorExit:
+                    break
+                except Exception:
                     break
 
         response = StreamingHttpResponse(

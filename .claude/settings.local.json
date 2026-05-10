@@ -2,7 +2,10 @@
   "permissions": {
     "allow": [
       "Bash(Get-ChildItem \"D:\\\\Personal Projects\\\\CONAEA\\\\conanea-backend\" -Exclude \"venv\")",
-      "Bash(Select-Object Name, PSIsContainer)"
+      "Bash(Select-Object Name, PSIsContainer)",
+      "Bash(python *)",
+      "Bash(venv\\\\Scripts\\\\python.exe -c \"import gevent; print\\('gevent OK:', gevent.__version__\\)\")",
+      "PowerShell(Stop-Process *)"
     ]
   }
 }
