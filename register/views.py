@@ -283,7 +283,7 @@ class VerifyCodeView(APIView):
                 'SELECT verify_registration_code(%s, %s)',
                 [university_type, code]
             )
-            result = cursor.fetchone()[0]
+            result = json.loads(cursor.fetchone()[0])
 
         http_status = result.pop('http_status', 200)
         if 'error' in result:
