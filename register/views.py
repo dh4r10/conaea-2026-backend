@@ -278,118 +278,17 @@ class VerifyCodeView(APIView):
                 status=status.HTTP_400_BAD_REQUEST
             )
 
-        # ── Preventa activa ────────────────────────────────────────────
-        now = timezone.now()
-        pre_sale = PreSale.objects.filter(
-            start_date__lte=now,
-            end_date__gte=now,
-            is_active=True,
-        ).order_by('-start_date').first()
-
-        if pre_sale is None:
-            return Response(
-                {'error': 'No hay una preventa activa en este momento'},
-                status=status.HTTP_400_BAD_REQUEST
+        with connection.cursor() as cursor:
+            cursor.execute(
+                'SELECT verify_registration_code(%s, %s)',
+                [university_type, code]
             )
+            result = cursor.fetchone()[0]
 
-        # ── Caso Referido ──────────────────────────────────────────────
-        if university_type == 'Referido':
-            try:
-                university = PartnerUniversity.objects.select_related(
-                    'quota_type'
-                ).get(code=code, is_active=True)
-            except PartnerUniversity.DoesNotExist:
-                return Response(
-                    {'error': 'Código inválido'},
-                    status=status.HTTP_404_NOT_FOUND
-                )
-
-            available_cups = None
-            if pre_sale.booking_mode:
-                try:
-                    individual_cup = IndividualCup.objects.get(
-                        pre_sale=pre_sale,
-                        partner_university=university,
-                        is_active=True,
-                    )
-                    used_by_university = Participant.objects.filter(
-                        cod_university=university.code,
-                        is_active=True,
-                    ).count()
-                    if used_by_university >= individual_cup.currency:
-                        return Response(
-                            {'error': 'Cupos agotados'},
-                            status=status.HTTP_400_BAD_REQUEST
-                        )
-                    available_cups = individual_cup.currency - used_by_university
-                except IndividualCup.DoesNotExist:
-                    return Response(
-                        {'error': 'Tu universidad no tiene cupos registrados en esta preventa'},
-                        status=status.HTTP_400_BAD_REQUEST
-                    )
-
-            slot = AvailableSlot.objects.filter(
-                pre_sale__start_date__lte=now,
-                pre_sale__end_date__gte=now,
-                pre_sale__is_active=True,
-                quota_type=university.quota_type,
-                is_active=True,
-            ).select_related('pre_sale').first()
-
-            return Response({
-                'valid': True,
-                'university_type': 'Referido',
-                'cod_university': university.code,
-                'university_name': university.name,
-                'country': university.country,
-                'region': university.region,
-                'place': university.place,
-                'quota_type_id': university.quota_type.id,
-                'quota_type_name': university.quota_type.name,
-                'currency': university.quota_type.currency,
-                'mount': str(slot.mount) if slot else None,
-                'available_cups': available_cups,
-            }, status=status.HTTP_200_OK)
-
-        # ── Caso General ───────────────────────────────────────────────
-        if pre_sale and pre_sale.booking_mode:
-            return Response(
-                {'error': 'Las inscripciones de tipo General no están disponibles en este momento'},
-                status=status.HTTP_400_BAD_REQUEST
-            )
-
-        try:
-            dynamic_code = DynamicCode.objects.select_related(
-                'quota_type'
-            ).get(code=code, is_active=True)
-        except DynamicCode.DoesNotExist:
-            return Response(
-                {'error': 'Código inválido'},
-                status=status.HTTP_404_NOT_FOUND
-            )
-
-        if dynamic_code.status != 'Disponible':
-            return Response(
-                {'error': 'Código usado'},
-                status=status.HTTP_400_BAD_REQUEST
-            )
-
-        slot = AvailableSlot.objects.filter(
-            pre_sale__start_date__lte=now,
-            pre_sale__end_date__gte=now,
-            pre_sale__is_active=True,
-            quota_type=dynamic_code.quota_type,
-            is_active=True,
-        ).select_related('pre_sale').first()
-
-        return Response({
-            'valid': True,
-            'university_type': 'General',
-            'quota_type_id': dynamic_code.quota_type.id,
-            'quota_type_name': dynamic_code.quota_type.name,
-            'currency': dynamic_code.quota_type.currency,
-            'mount': str(slot.mount) if slot else None,
-        }, status=status.HTTP_200_OK)
+        http_status = result.pop('http_status', 200)
+        if 'error' in result:
+            return Response(result, status=http_status)
+        return Response(result, status=status.HTTP_200_OK)
 
 
 class InscriptionView(APIView):
