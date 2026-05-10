@@ -6,7 +6,7 @@ from rest_framework.response import Response
 from rest_framework.parsers import MultiPartParser, FormParser
 from django.db import connection, transaction as db_transaction
 from rest_framework.views import APIView, View
-from .models import PreSale, QuotaType, AvailableSlot, Registration, Transaction, Refund, DynamicCode
+from .models import PreSale, QuotaType, AvailableSlot, Registration, Transaction, Refund, DynamicCode, IndividualCup
 from participant.models import Participant
 from participant.models import Enrollment
 from .serializers import (
@@ -278,6 +278,20 @@ class VerifyCodeView(APIView):
                 status=status.HTTP_400_BAD_REQUEST
             )
 
+        # ── Preventa activa ────────────────────────────────────────────
+        now = timezone.now()
+        pre_sale = PreSale.objects.filter(
+            start_date__lte=now,
+            end_date__gte=now,
+            is_active=True,
+        ).order_by('-start_date').first()
+
+        if pre_sale is None:
+            return Response(
+                {'error': 'No hay una preventa activa en este momento'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
         # ── Caso Referido ──────────────────────────────────────────────
         if university_type == 'Referido':
             try:
@@ -290,8 +304,30 @@ class VerifyCodeView(APIView):
                     status=status.HTTP_404_NOT_FOUND
                 )
 
-            # Obtener monto de la preventa activa
-            now = timezone.now()
+            available_cups = None
+            if pre_sale.booking_mode:
+                try:
+                    individual_cup = IndividualCup.objects.get(
+                        pre_sale=pre_sale,
+                        partner_university=university,
+                        is_active=True,
+                    )
+                    used_by_university = Participant.objects.filter(
+                        cod_university=university.code,
+                        is_active=True,
+                    ).count()
+                    if used_by_university >= individual_cup.currency:
+                        return Response(
+                            {'error': 'Cupos agotados'},
+                            status=status.HTTP_400_BAD_REQUEST
+                        )
+                    available_cups = individual_cup.currency - used_by_university
+                except IndividualCup.DoesNotExist:
+                    return Response(
+                        {'error': 'Tu universidad no tiene cupos registrados en esta preventa'},
+                        status=status.HTTP_400_BAD_REQUEST
+                    )
+
             slot = AvailableSlot.objects.filter(
                 pre_sale__start_date__lte=now,
                 pre_sale__end_date__gte=now,
@@ -312,9 +348,16 @@ class VerifyCodeView(APIView):
                 'quota_type_name': university.quota_type.name,
                 'currency': university.quota_type.currency,
                 'mount': str(slot.mount) if slot else None,
+                'available_cups': available_cups,
             }, status=status.HTTP_200_OK)
 
         # ── Caso General ───────────────────────────────────────────────
+        if pre_sale and pre_sale.booking_mode:
+            return Response(
+                {'error': 'Las inscripciones de tipo General no están disponibles en este momento'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
         try:
             dynamic_code = DynamicCode.objects.select_related(
                 'quota_type'
@@ -331,7 +374,6 @@ class VerifyCodeView(APIView):
                 status=status.HTTP_400_BAD_REQUEST
             )
 
-        now = timezone.now()
         slot = AvailableSlot.objects.filter(
             pre_sale__start_date__lte=now,
             pre_sale__end_date__gte=now,
@@ -497,6 +539,34 @@ class InscriptionView(APIView):
                 {'error': 'No hay cupos disponibles para esta categoría'},
                 status=status.HTTP_400_BAD_REQUEST
             )
+
+        # ── 6.5. Verificar cupo individual por universidad (booking_mode) ─
+        if pre_sale.booking_mode:
+            if university_type == 'General':
+                return Response(
+                    {'error': 'Las inscripciones de tipo General no están disponibles en este momento'},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+            try:
+                individual_cup = IndividualCup.objects.get(
+                    pre_sale=pre_sale,
+                    partner_university=university,
+                    is_active=True,
+                )
+                used_by_university = Participant.objects.filter(
+                    cod_university=cod_university,
+                    is_active=True,
+                ).count()
+                if used_by_university >= individual_cup.currency:
+                    return Response(
+                        {'error': 'Cupos agotados'},
+                        status=status.HTTP_400_BAD_REQUEST
+                    )
+            except IndividualCup.DoesNotExist:
+                return Response(
+                    {'error': 'Tu universidad no tiene cupos registrados en esta preventa'},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
 
         # ── 7. Verificar duplicados ───────────────────────────────────
         identity_document = data.get('identity_document', '').strip()
@@ -669,6 +739,60 @@ class AvailableSlotsSSEView(View):
                 try:
                     data = get_slots_data()
                     yield f"data: {json.dumps(data)}\n\n"
+                    time.sleep(10)
+                except GeneratorExit:
+                    break
+
+        response = StreamingHttpResponse(
+            event_stream(),
+            content_type='text/event-stream'
+        )
+        response['Cache-Control'] = 'no-cache'
+        response['X-Accel-Buffering'] = 'no'
+        return response
+
+
+class IndividualCupsSSEView(View):
+
+    def get(self, request):
+        cod_university = request.GET.get('cod_university', '').strip()
+        if not cod_university:
+            from django.http import HttpResponse
+            return HttpResponse('cod_university requerido', status=400)
+
+        def event_stream():
+            while True:
+                try:
+                    now = timezone.now()
+                    pre_sale = PreSale.objects.filter(
+                        start_date__lte=now,
+                        end_date__gte=now,
+                        is_active=True,
+                    ).order_by('-start_date').first()
+
+                    if not pre_sale or not pre_sale.booking_mode:
+                        yield f"data: {json.dumps({'available_cups': None})}\n\n"
+                        time.sleep(10)
+                        continue
+
+                    try:
+                        university = PartnerUniversity.objects.get(
+                            code=cod_university, is_active=True
+                        )
+                        individual_cup = IndividualCup.objects.get(
+                            pre_sale=pre_sale,
+                            partner_university=university,
+                            is_active=True,
+                        )
+                        used = Participant.objects.filter(
+                            cod_university=cod_university,
+                            is_active=True,
+                        ).count()
+                        available = individual_cup.currency - used
+                    except (PartnerUniversity.DoesNotExist, IndividualCup.DoesNotExist):
+                        available = 0
+
+                    yield f"data: {json.dumps({'available_cups': available})}\n\n"
                     time.sleep(10)
                 except GeneratorExit:
                     break

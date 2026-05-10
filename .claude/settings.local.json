@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(Get-ChildItem \"D:\\\\Personal Projects\\\\CONAEA\\\\conanea-backend\" -Exclude \"venv\")",
+      "Bash(Select-Object Name, PSIsContainer)"
+    ]
+  }
+}

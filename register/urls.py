@@ -2,6 +2,7 @@ from django.urls import path, include
 from rest_framework import routers
 from .views import (
     AvailableSlotsSSEView,
+    IndividualCupsSSEView,
     PreSaleViewSet,
     QuotaTypeViewSet,
     AvailableSlotViewSet,
@@ -9,7 +10,7 @@ from .views import (
     TransactionViewSet,
     RefundViewSet,
     DynamicCodeViewSet,
-    VerifyCodeView,    # 👈
+    VerifyCodeView,
     InscriptionView,
     AvailableSlotsRealTimeView,
 )
@@ -30,4 +31,5 @@ urlpatterns = [
     path('register/inscription/', InscriptionView.as_view(), name='inscription'),
     path('available-slots/', AvailableSlotsRealTimeView.as_view(), name='available-slots'),
     path('available-slots/sse/', AvailableSlotsSSEView.as_view(), name='available-slots-sse'),
+    path('individual-cups/sse/', IndividualCupsSSEView.as_view(), name='individual-cups-sse'),
 ]

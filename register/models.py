@@ -12,6 +12,7 @@ class PreSale(models.Model):
     name = models.CharField(max_length=50)
     start_date = models.DateTimeField()
     end_date = models.DateTimeField()
+    booking_mode = models.BooleanField(default=False)
     is_active = models.BooleanField(default=True)
 
     def __str__(self):
@@ -132,6 +133,27 @@ class Refund(models.Model):
 
     class Meta:
         db_table = 'refunds'
+
+
+class IndividualCup(models.Model):
+    pre_sale = models.ForeignKey(
+        PreSale,
+        on_delete=models.PROTECT,
+        db_column='pre_sale_id'
+    )
+    partner_university = models.ForeignKey(
+        'participant.PartnerUniversity',
+        on_delete=models.PROTECT,
+        db_column='partner_university_id'
+    )
+    currency = models.IntegerField()
+    is_active = models.BooleanField(default=True)
+
+    def __str__(self):
+        return f"{self.partner_university} - {self.pre_sale}"
+
+    class Meta:
+        db_table = 'individual_cups'
 
 
 class DynamicCode(models.Model):
