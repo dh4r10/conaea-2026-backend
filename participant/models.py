@@ -151,6 +151,7 @@ class PartnerUniversity(models.Model):
 
     class Meta:
         db_table = 'partner_universities'
+        ordering = ['name']
 
 
 class Delegate(models.Model):
