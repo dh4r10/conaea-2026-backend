@@ -374,12 +374,18 @@ class InscriptionView(APIView):
             cod_country = 0        # 👈 fijo
 
         # ── 3. Validar formulario del participante ─────────────────────
-        data = request.data.copy()
+        # request.data.copy() falla cuando hay TemporaryUploadedFile (no pickleable).
+        # Se construye un dict plano con POST + FILES para evitar deepcopy del QueryDict.
+        # dict.update(MultiValueDict) usa la ruta rápida de CPython que lee listas internas
+        # en vez de llamar __getitem__, por eso se usa .items() que sí devuelve el archivo.
+        serializer_data = request.POST.dict()
+        for k, v in request.FILES.items():
+            serializer_data[k] = v
         for field in ('discapacidad', 'alergia'):
-            if data.get(field, '').strip() == '-':
-                data[field] = ''
+            if serializer_data.get(field, '').strip() == '-':
+                serializer_data[field] = ''
 
-        serializer = ParticipantValidationSerializer(data=data)
+        serializer = ParticipantValidationSerializer(data=serializer_data)
         if not serializer.is_valid():
             return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
@@ -565,8 +571,8 @@ class InscriptionView(APIView):
                 raise _last_exc
 
         # ── 11. Registrar condiciones especiales (si vienen) ──────────
-        discapacidad = data.get('discapacidad', '').strip()
-        alergia = data.get('alergia', '').strip()
+        discapacidad = serializer_data.get('discapacidad', '').strip()
+        alergia = serializer_data.get('alergia', '').strip()
 
         if discapacidad:
             ParticipantSpecialCondition.objects.create(

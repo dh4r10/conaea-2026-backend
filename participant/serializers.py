@@ -233,8 +233,8 @@ class ParticipantValidationSerializer(serializers.Serializer):
     def validate_archive(self, value):
         if not value.name.lower().endswith('.pdf'):
             raise serializers.ValidationError('Solo se permiten archivos PDF')
-        if value.size > 300 * 1024:
-            raise serializers.ValidationError('El archivo no debe superar los 300 KB')
+        if value.size > 700 * 1024:
+            raise serializers.ValidationError('El archivo no debe superar los 700 KB')
         return value
     
     def validate_cellphone(self, value):
