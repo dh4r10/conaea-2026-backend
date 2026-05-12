@@ -1,11 +1,14 @@
+import logging
+
 from django.utils import timezone
 from django.db.models import Count, Case, When, IntegerField
 from rest_framework import viewsets, permissions, status
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.parsers import MultiPartParser, FormParser
-from django.db import connection, transaction as db_transaction
+from django.db import connection, transaction as db_transaction, IntegrityError
 from rest_framework.views import APIView, View
+
 from .models import PreSale, QuotaType, AvailableSlot, Registration, Transaction, Refund, DynamicCode, IndividualCup
 from participant.models import Participant
 from participant.models import Enrollment
@@ -32,6 +35,8 @@ import string
 import json
 import time
 from django.http import StreamingHttpResponse
+
+logger = logging.getLogger(__name__)
 
 
 def generate_dynamic_code():
@@ -477,7 +482,7 @@ class InscriptionView(APIView):
                 status=status.HTTP_400_BAD_REQUEST
             )
         
-        print(f"Verificando email duplicado: {email}")
+        logger.info("Verificando email duplicado: %s", email)
 
         if Participant.objects.filter(email=email, is_active=True).exists():
             return Response(
@@ -486,36 +491,72 @@ class InscriptionView(APIView):
             )
 
         # ── 8. Crear Registration ─────────────────────────────────────
-        registration = Registration.objects.create(
-            pre_sale=pre_sale,
-            quota_type=quota_type,
-        )
+        try:
+            registration = Registration.objects.create(
+                pre_sale=pre_sale,
+                quota_type=quota_type,
+            )
+        except IntegrityError as exc:
+            logger.error("Error al crear Registration para pre_sale=%s quota_type=%s: %s", pre_sale.id, quota_type.id, exc)
+            return Response(
+                {'error': 'Error al crear el registro. Por favor intenta nuevamente.'},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+        except Exception as exc:
+            logger.error("Error inesperado al crear Registration: %s", exc)
+            return Response(
+                {'error': 'Error interno del servidor al crear el registro.'},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
 
         # ── 9. Crear Participant ──────────────────────────────────────
-        participant = Participant.objects.create(
-            registration=registration,
-            photograph=photograph,
-            first_name=data.get('first_name', '').strip(),
-            paternal_surname=data.get('paternal_surname', '').strip(),
-            maternal_surname=data.get('maternal_surname', '').strip(),
-            birthday=data.get('birthdate'),
-            identity_document=identity_document,
-            document_type=data.get('document_type', '').strip(),
-            cellphone=serializer.validated_data.get('cellphone', ''),
-            email=email,
-            cod_country=cod_country,
-            cod_university=cod_university,
-            university_type=university_type,
-            academic_cycle=data.get('academic_cycle', '0').strip() if university_type == 'Referido' else '0',
-        )
+        cellphone = serializer.validated_data.get('cellphone') or data.get('cellphone', '').strip()
+        try:
+            participant = Participant.objects.create(
+                registration=registration,
+                photograph=photograph,
+                first_name=data.get('first_name', '').strip(),
+                paternal_surname=data.get('paternal_surname', '').strip(),
+                maternal_surname=data.get('maternal_surname', '').strip(),
+                birthday=data.get('birthdate'),
+                identity_document=identity_document,
+                document_type=data.get('document_type', '').strip(),
+                cellphone=cellphone,
+                email=email,
+                cod_country=cod_country,
+                cod_university=cod_university,
+                university_type=university_type,
+                academic_cycle=data.get('academic_cycle', '0').strip() if university_type == 'Referido' else '0',
+            )
+        except IntegrityError as exc:
+            logger.error("Error de integridad al crear Participant (email=%s, doc=%s): %s", email, identity_document, exc)
+            return Response(
+                {'error': 'Ya existe un participante con ese documento o correo electrónico.'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        except Exception as exc:
+            logger.error("Error inesperado al crear Participant (email=%s): %s", email, exc)
+            return Response(
+                {'error': 'Error interno del servidor al registrar el participante.'},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+
+        logger.info("Participant creado exitosamente: id=%s email=%s", participant.id, email)
 
         # ── 10. Crear Enrollment (ficha de matrícula) ─────────────────
         if archive:
-            Enrollment.objects.create(
-                participant=participant,
-                type='matricula',
-                archive=archive,
-            )
+            try:
+                Enrollment.objects.create(
+                    participant=participant,
+                    type='matricula',
+                    archive=archive,
+                )
+            except Exception as exc:
+                logger.error("Error al crear Enrollment para participant=%s: %s", participant.id, exc)
+                return Response(
+                    {'error': 'Error al guardar la ficha de matrícula.'},
+                    status=status.HTTP_500_INTERNAL_SERVER_ERROR
+                )
 
         # ── 11. Registrar condiciones especiales (si vienen) ──────────
         discapacidad = data.get('discapacidad', '').strip()
@@ -539,6 +580,8 @@ class InscriptionView(APIView):
             dynamic_code.status = 'Usado'
             dynamic_code.used_at = now
             dynamic_code.save(update_fields=['status', 'used_at'])
+
+        logger.info("Inscripción completada: registration_uuid=%s participant_id=%s", registration.uuid, participant.id)
 
         return Response({
             'message': 'Inscripción registrada exitosamente',
