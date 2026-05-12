@@ -5,7 +5,9 @@
       "Bash(Select-Object Name, PSIsContainer)",
       "Bash(python *)",
       "Bash(venv\\\\Scripts\\\\python.exe -c \"import gevent; print\\('gevent OK:', gevent.__version__\\)\")",
-      "PowerShell(Stop-Process *)"
+      "PowerShell(Stop-Process *)",
+      "WebFetch(domain:localhost)",
+      "Bash(curl *)"
     ]
   }
 }

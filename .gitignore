@@ -91,3 +91,12 @@ build/
 *.tmp
 
 /logs/
+
+# =========================
+# 🦗 Locust (pruebas de carga)
+# =========================
+locust_report*.html
+*_stats.csv
+*_stats_history.csv
+*_failures.csv
+*_exceptions.csv

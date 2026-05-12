@@ -36,8 +36,11 @@ ALLOWED_HOSTS = [
     '.railway.app',
     'conaea.com',
     'www.conaea.com',
-    '127.0.0.1'
+    '127.0.0.1',
 ]
+
+if DEBUG:
+    ALLOWED_HOSTS += ['localhost']
 
 # Application definition
 
