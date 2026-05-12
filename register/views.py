@@ -496,21 +496,15 @@ class InscriptionView(APIView):
                 pre_sale=pre_sale,
                 quota_type=quota_type,
             )
-        except IntegrityError as exc:
-            logger.error("Error al crear Registration para pre_sale=%s quota_type=%s: %s", pre_sale.id, quota_type.id, exc)
-            return Response(
-                {'error': 'Error al crear el registro. Por favor intenta nuevamente.'},
-                status=status.HTTP_500_INTERNAL_SERVER_ERROR
-            )
         except Exception as exc:
-            logger.error("Error inesperado al crear Registration: %s", exc)
-            return Response(
-                {'error': 'Error interno del servidor al crear el registro.'},
-                status=status.HTTP_500_INTERNAL_SERVER_ERROR
-            )
+            logger.error("Error al crear Registration pre_sale=%s quota_type=%s: %s", pre_sale.id, quota_type.id, exc, exc_info=True)
+            raise
 
         # ── 9. Crear Participant ──────────────────────────────────────
+        # Savepoint para poder capturar IntegrityError (race condition en duplicados)
+        # sin abortar la transacción completa.
         cellphone = serializer.validated_data.get('cellphone') or data.get('cellphone', '').strip()
+        sid = db_transaction.savepoint()
         try:
             participant = Participant.objects.create(
                 registration=registration,
@@ -528,35 +522,47 @@ class InscriptionView(APIView):
                 university_type=university_type,
                 academic_cycle=data.get('academic_cycle', '0').strip() if university_type == 'Referido' else '0',
             )
+            db_transaction.savepoint_commit(sid)
         except IntegrityError as exc:
-            logger.error("Error de integridad al crear Participant (email=%s, doc=%s): %s", email, identity_document, exc)
+            db_transaction.savepoint_rollback(sid)
+            logger.error("IntegrityError al crear Participant (email=%s, doc=%s): %s", email, identity_document, exc, exc_info=True)
             return Response(
                 {'error': 'Ya existe un participante con ese documento o correo electrónico.'},
                 status=status.HTTP_400_BAD_REQUEST
             )
         except Exception as exc:
-            logger.error("Error inesperado al crear Participant (email=%s): %s", email, exc)
-            return Response(
-                {'error': 'Error interno del servidor al registrar el participante.'},
-                status=status.HTTP_500_INTERNAL_SERVER_ERROR
-            )
+            logger.error("Error al crear Participant (email=%s): %s", email, exc, exc_info=True)
+            raise
 
         logger.info("Participant creado exitosamente: id=%s email=%s", participant.id, email)
 
         # ── 10. Crear Enrollment (ficha de matrícula) ─────────────────
         if archive:
-            try:
-                Enrollment.objects.create(
-                    participant=participant,
-                    type='matricula',
-                    archive=archive,
+            _last_exc = None
+            for _attempt in range(3):
+                try:
+                    archive.seek(0)
+                    Enrollment.objects.create(
+                        participant=participant,
+                        type='matricula',
+                        archive=archive,
+                    )
+                    _last_exc = None
+                    break
+                except Exception as exc:
+                    _last_exc = exc
+                    logger.warning(
+                        "Intento %d/3 fallido al subir Enrollment (participant=%s): %s",
+                        _attempt + 1, participant.id, exc,
+                    )
+                    if _attempt < 2:
+                        time.sleep(2 ** _attempt)  # 1s, 2s
+            if _last_exc:
+                logger.error(
+                    "Error al crear Enrollment para participant=%s tras 3 intentos: %s",
+                    participant.id, _last_exc, exc_info=True,
                 )
-            except Exception as exc:
-                logger.error("Error al crear Enrollment para participant=%s: %s", participant.id, exc)
-                return Response(
-                    {'error': 'Error al guardar la ficha de matrícula.'},
-                    status=status.HTTP_500_INTERNAL_SERVER_ERROR
-                )
+                raise _last_exc
 
         # ── 11. Registrar condiciones especiales (si vienen) ──────────
         discapacidad = data.get('discapacidad', '').strip()
