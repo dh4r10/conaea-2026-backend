@@ -100,3 +100,5 @@ locust_report*.html
 *_stats_history.csv
 *_failures.csv
 *_exceptions.csv
+
+/skills/

@@ -294,24 +294,35 @@ class ParticipantTableSerializer(serializers.ModelSerializer):
     vouchers = serializers.SerializerMethodField()
     enrollments = serializers.SerializerMethodField()
     is_validated = serializers.SerializerMethodField()
+    discapacidad = serializers.SerializerMethodField()
+    alergia = serializers.SerializerMethodField()
 
     class Meta:
         model = Participant
         fields = [
             'id',
+            'first_name',
+            'paternal_surname',
+            'maternal_surname',
+            'birthday',
             'document_type',
             'identity_document',
             'photograph',
             'full_name',
+            'cod_country',
+            'cod_university',
             'university_type',
             'university_name',
             'cellphone',
             'email',
+            'academic_cycle',
             'quota_type',
             'pre_sale',
             'vouchers',
             'enrollments',
-            'is_validated', 
+            'is_validated',
+            'discapacidad',
+            'alergia',
         ]
 
     def get_full_name(self, obj):
@@ -373,10 +384,26 @@ class ParticipantTableSerializer(serializers.ModelSerializer):
         return result
     
     def get_is_validated(self, obj):
-        validations = self.context.get('validations', set())  # 👈
+        validations = self.context.get('validations', set())
         registration_id = obj.registration.id if obj.registration else None
         if not registration_id:
             return False
         return ('registration', registration_id) in validations
-    
+
+    def get_discapacidad(self, obj):
+        condition = ParticipantSpecialCondition.objects.filter(
+            participant=obj,
+            special_condition_id=1,
+            is_active=True,
+        ).first()
+        return condition.description if condition else ''
+
+    def get_alergia(self, obj):
+        condition = ParticipantSpecialCondition.objects.filter(
+            participant=obj,
+            special_condition_id=2,
+            is_active=True,
+        ).first()
+        return condition.description if condition else ''
+
 

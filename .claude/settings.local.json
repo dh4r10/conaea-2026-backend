@@ -7,7 +7,8 @@
       "Bash(venv\\\\Scripts\\\\python.exe -c \"import gevent; print\\('gevent OK:', gevent.__version__\\)\")",
       "PowerShell(Stop-Process *)",
       "WebFetch(domain:localhost)",
-      "Bash(curl *)"
+      "Bash(curl *)",
+      "Bash(dir D:\\\\Personal Projects\\\\CONAEA\\\\conanea-backend *)"
     ]
   }
 }

@@ -148,6 +148,19 @@ class PartnerUniversityViewSet(viewsets.ModelViewSet):
             queryset = queryset.filter(name__icontains=search)
         return queryset
 
+    @action(detail=False, methods=['get'], url_path='select')
+    def select(self, request):
+        search = request.query_params.get('search', '').strip()
+        qs = PartnerUniversity.objects.filter(is_active=True).only('code', 'name', 'abbreviation')
+        if search:
+            qs = qs.filter(Q(name__icontains=search) | Q(abbreviation__icontains=search))
+        qs = qs.order_by('name')[:50]
+        data = [
+            {'code': u.code, 'name': u.name, 'abbreviation': u.abbreviation}
+            for u in qs
+        ]
+        return Response(data)
+
     @action(detail=True, methods=['get'], url_path='delegates')
     def delegates(self, request, pk=None):
         university = self.get_object()
@@ -302,13 +315,27 @@ class ParticipantUpdateView(APIView):
         updatable_fields = [
             'first_name', 'paternal_surname', 'maternal_surname',
             'birthday', 'identity_document', 'document_type',
-            'cellphone', 'email', 'academic_cycle',
+            'cellphone', 'email',
         ]
+
+        if participant.university_type == 'Referido':
+            updatable_fields += ['academic_cycle', 'cod_university']
 
         for field in updatable_fields:
             value = data.get(field, '').strip() if isinstance(data.get(field), str) else data.get(field)
             if value is not None and value != '':
                 setattr(participant, field, value)
+
+        if participant.university_type == 'Referido':
+            cod_country = data.get('cod_country')
+            if cod_country is not None and cod_country != '':
+                try:
+                    participant.cod_country = int(cod_country)
+                except (ValueError, TypeError):
+                    return Response(
+                        {'cod_country': 'Debe ser un número entero'},
+                        status=status.HTTP_400_BAD_REQUEST
+                    )
 
         # ── Foto ───────────────────────────────────────────────────────
         photograph = request.FILES.get('photograph')
@@ -316,6 +343,31 @@ class ParticipantUpdateView(APIView):
             participant.photograph = photograph
 
         participant.save()
+
+        # ── Condiciones especiales ─────────────────────────────────────
+        SPECIAL_CONDITION_IDS = {'discapacidad': 1, 'alergia': 2}
+
+        for field, condition_id in SPECIAL_CONDITION_IDS.items():
+            value = data.get(field, '').strip() if field in data else ''
+            condition = ParticipantSpecialCondition.objects.filter(
+                participant=participant,
+                special_condition_id=condition_id,
+            ).first()
+            if value:
+                if condition:
+                    condition.description = value
+                    condition.is_active = True
+                    condition.save()
+                else:
+                    ParticipantSpecialCondition.objects.create(
+                        participant=participant,
+                        special_condition_id=condition_id,
+                        description=value,
+                    )
+            else:
+                if condition and condition.is_active:
+                    condition.is_active = False
+                    condition.save()
 
         return Response({
             'message': 'Participante actualizado correctamente',
