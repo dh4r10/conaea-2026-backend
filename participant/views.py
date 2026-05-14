@@ -6,7 +6,7 @@ from rest_framework.parsers import MultiPartParser, FormParser
 
 from .models import SpecialCondition, Participant, ParticipantSpecialCondition, Enrollment, PartnerUniversity, Delegate
 from security.models import Validation
-from register.models import AvailableSlot, QuotaType
+from register.models import AvailableSlot, QuotaType, PreSale
 from .serializers import (
     ParticipantTableSerializer,
     SpecialConditionSerializer,
@@ -493,6 +493,9 @@ class ParticipantTableView(APIView):
                 'validations': validations,  # 👈
             }
         )
-        
-        return paginator.get_paginated_response(serializer.data)
+
+        response = paginator.get_paginated_response(serializer.data)
+        response.data['pre_sales'] = list(PreSale.objects.filter(is_active=True).values('id', 'name'))
+        response.data['quota_types'] = list(QuotaType.objects.filter(is_active=True).values('id', 'name'))
+        return response
     
