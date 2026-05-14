@@ -3,12 +3,13 @@ from security.services.mailtrap_service import check_mailtrap_suppression
 from .models import PersonalData, User, Validation
 from rest_framework.views import APIView
 from .serializers import (
-    PersonalDataSerializer, 
+    PersonalDataSerializer,
     UserSerializer,
     UserPermissionsSerializer,
     UserRegisterSerializer,
     ValidationSerializer,
-    ValidationDetailSerializer
+    ValidationDetailSerializer,
+    EmailLogSerializer,
 )
 from rest_framework import viewsets, permissions, status
 from rest_framework.decorators import action
@@ -18,6 +19,7 @@ from rest_framework import status
 
 from .models import EmailLog
 from django.utils import timezone
+from participant.pagination import StandardPagination
 
 from .services.email_service import send_welcome_email
 
@@ -301,6 +303,29 @@ class ValidationViewSet(viewsets.ModelViewSet):
         if register_id:
             queryset = queryset.filter(register_id=register_id)
         return queryset
+
+class EmailLogListView(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request):
+        participant_id = request.query_params.get('participant_id')
+        if not participant_id:
+            return Response(
+                {'error': 'El parámetro participant_id es requerido'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        logs = EmailLog.objects.filter(participant_id=participant_id)
+
+        status_filter = request.query_params.get('status')
+        if status_filter:
+            logs = logs.filter(status=status_filter)
+
+        paginator = StandardPagination()
+        page = paginator.paginate_queryset(logs, request)
+        serializer = EmailLogSerializer(page, many=True)
+        return paginator.get_paginated_response(serializer.data)
+
 
 class ChangePasswordView(APIView):
     permission_classes = [permissions.IsAuthenticated]
