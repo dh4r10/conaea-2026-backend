@@ -6,7 +6,7 @@ from rest_framework.parsers import MultiPartParser, FormParser
 
 from .models import SpecialCondition, Participant, ParticipantSpecialCondition, Enrollment, PartnerUniversity, Delegate
 from security.models import Validation
-from register.models import AvailableSlot
+from register.models import AvailableSlot, QuotaType
 from .serializers import (
     ParticipantTableSerializer,
     SpecialConditionSerializer,
@@ -147,6 +147,15 @@ class PartnerUniversityViewSet(viewsets.ModelViewSet):
         if search:
             queryset = queryset.filter(name__icontains=search)
         return queryset
+
+    def list(self, request, *args, **kwargs):
+        queryset = self.filter_queryset(self.get_queryset())
+        page = self.paginate_queryset(queryset)
+        serializer = self.get_serializer(page, many=True)
+        response = self.get_paginated_response(serializer.data)
+        quota_types = list(QuotaType.objects.filter(is_active=True).values('id', 'name'))
+        response.data['quota_types'] = quota_types
+        return response
 
     @action(detail=False, methods=['get'], url_path='select')
     def select(self, request):
