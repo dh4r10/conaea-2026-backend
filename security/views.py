@@ -16,6 +16,7 @@ from rest_framework.decorators import action
 from rest_framework.response import Response
 from django.conf import settings
 from rest_framework import status
+from django.db.models import Sum
 
 from .models import EmailLog
 from django.utils import timezone
@@ -325,6 +326,60 @@ class EmailLogListView(APIView):
         page = paginator.paginate_queryset(logs, request)
         serializer = EmailLogSerializer(page, many=True)
         return paginator.get_paginated_response(serializer.data)
+
+
+class DashboardView(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request):
+        from participant.models import Participant
+        from register.models import AvailableSlot, DynamicCode, PreSale
+        from activity.models import Speaker, Day
+
+        total_p = Participant.objects.filter(is_active=True).count()
+        validated_ids = Validation.objects.filter(model='registration').values_list('register_id', flat=True)
+        validated_p = Participant.objects.filter(is_active=True, registration_id__in=validated_ids).count()
+
+        slot_qs = AvailableSlot.objects.filter(is_active=True)
+        total_slots = slot_qs.aggregate(total=Sum('amount'))['total'] or 0
+
+        total_codes = DynamicCode.objects.filter(is_active=True).count()
+        available_codes = DynamicCode.objects.filter(is_active=True, status='Disponible').count()
+
+        active_pre_sale = PreSale.objects.filter(is_active=True).first()
+        pre_sale_data = None
+        if active_pre_sale:
+            slots = list(
+                AvailableSlot.objects.filter(pre_sale=active_pre_sale, is_active=True)
+                .values('quota_type__name', 'amount')
+                .order_by('id')
+            )
+            pre_sale_data = {
+                'name': active_pre_sale.name,
+                'start_date': active_pre_sale.start_date,
+                'end_date': active_pre_sale.end_date,
+                'slots': slots,
+            }
+
+        return Response({
+            'participants': {
+                'total': total_p,
+                'validated': validated_p,
+                'pending': total_p - validated_p,
+            },
+            'slots': {
+                'total': total_slots,
+                'categories': slot_qs.count(),
+            },
+            'speakers': Speaker.objects.filter(is_active=True).count(),
+            'days': Day.objects.filter(is_active=True).count(),
+            'codes': {
+                'total': total_codes,
+                'available': available_codes,
+                'used': total_codes - available_codes,
+            },
+            'active_pre_sale': pre_sale_data,
+        })
 
 
 class ChangePasswordView(APIView):
