@@ -18,12 +18,14 @@ from .serializers import (
     PartnerUniversitySerializer,
     PartnerUniversityDetailSerializer,
     DelegateSerializer,
+    DelegateListSerializer,
 )
 from .pagination import StandardPagination
 
 from django.db import connection
 from django.db.models import Q, Value
 from django.db.models.functions import Concat
+from django.utils import timezone
 
 
 class SpecialConditionViewSet(viewsets.ModelViewSet):
@@ -180,18 +182,37 @@ class PartnerUniversityViewSet(viewsets.ModelViewSet):
 
 class DelegateViewSet(viewsets.ModelViewSet):
     queryset = Delegate.objects.filter(is_active=True).select_related('partner_university')
-    serializer_class = DelegateSerializer
     permission_classes = [permissions.IsAuthenticated]
+    pagination_class = StandardPagination
+
+    def get_serializer_class(self):
+        if self.action == 'list':
+            return DelegateListSerializer
+        return DelegateSerializer
 
     def get_queryset(self):
-        queryset = super().get_queryset()
-
+        queryset = Delegate.objects.filter(is_active=True).select_related('partner_university')
         partner_university_id = self.request.query_params.get('partner_university_id')
-
+        search = self.request.query_params.get('search', '').strip()
         if partner_university_id:
             queryset = queryset.filter(partner_university_id=partner_university_id)
-
+        if search:
+            queryset = queryset.filter(
+                Q(fullname__icontains=search) | Q(partner_university__name__icontains=search)
+            )
         return queryset
+
+    def list(self, request, *args, **kwargs):
+        queryset = self.filter_queryset(self.get_queryset())
+        page = self.paginate_queryset(queryset)
+        serializer = self.get_serializer(page, many=True)
+        response = self.get_paginated_response(serializer.data)
+        response.data['universities'] = list(
+            PartnerUniversity.objects.filter(is_active=True)
+            .values('id', 'name', 'abbreviation')
+            .order_by('name')
+        )
+        return response
 
 
 class ParticipantValidationView(APIView):
@@ -495,7 +516,19 @@ class ParticipantTableView(APIView):
         )
 
         response = paginator.get_paginated_response(serializer.data)
-        response.data['pre_sales'] = list(PreSale.objects.filter(is_active=True).values('id', 'name'))
+        pre_sales_qs = list(PreSale.objects.filter(is_active=True).values('id', 'name', 'start_date'))
+        if len(pre_sales_qs) == 1:
+            default_id = pre_sales_qs[0]['id']
+        elif len(pre_sales_qs) > 1:
+            now = timezone.now()
+            started = [p for p in pre_sales_qs if p['start_date'] <= now]
+            default_id = max(started, key=lambda p: p['start_date'])['id'] if started else pre_sales_qs[0]['id']
+        else:
+            default_id = None
+        response.data['pre_sales'] = [
+            {'id': p['id'], 'name': p['name'], 'is_default': p['id'] == default_id}
+            for p in pre_sales_qs
+        ]
         response.data['quota_types'] = list(QuotaType.objects.filter(is_active=True).values('id', 'name'))
         return response
     

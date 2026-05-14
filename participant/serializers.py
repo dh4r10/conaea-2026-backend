@@ -68,6 +68,18 @@ class DelegateSerializer(serializers.ModelSerializer):
         fields = '__all__'
 
 
+class DelegateListSerializer(serializers.ModelSerializer):
+    partner_university = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Delegate
+        fields = ['id', 'fullname', 'type_delegate', 'cellphone', 'partner_university']
+
+    def get_partner_university(self, obj):
+        u = obj.partner_university
+        return {'id': u.id, 'name': u.name, 'abbreviation': u.abbreviation, 'code': u.code}
+
+
 class PartnerUniversityDetailSerializer(serializers.ModelSerializer):
     delegates = serializers.SerializerMethodField()
     quota_type = QuotaTypeSerializer(read_only=True)  # 👈 muestra nombre en vez de ID
@@ -289,6 +301,7 @@ class ParticipantValidationSerializer(serializers.Serializer):
 class ParticipantTableSerializer(serializers.ModelSerializer):
     full_name = serializers.SerializerMethodField()
     university_name = serializers.SerializerMethodField()
+    university_abbreviation = serializers.SerializerMethodField()
     quota_type = serializers.SerializerMethodField()
     pre_sale = serializers.SerializerMethodField()
     vouchers = serializers.SerializerMethodField()
@@ -313,6 +326,7 @@ class ParticipantTableSerializer(serializers.ModelSerializer):
             'cod_university',
             'university_type',
             'university_name',
+            'university_abbreviation',
             'cellphone',
             'email',
             'academic_cycle',
@@ -333,6 +347,12 @@ class ParticipantTableSerializer(serializers.ModelSerializer):
             university = self.context.get('universities', {}).get(obj.cod_university)
             return university.name if university else obj.cod_university
         return obj.cod_university
+
+    def get_university_abbreviation(self, obj):
+        if obj.university_type == 'Referido':
+            university = self.context.get('universities', {}).get(obj.cod_university)
+            return university.abbreviation if university else None
+        return None
 
     def get_quota_type(self, obj):
         return obj.registration.quota_type.name
