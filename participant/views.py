@@ -505,13 +505,22 @@ class ParticipantTableView(APIView):
                 )
             }
 
+        # ── Precargar último email por participante ────────────────
+        from security.models import EmailLog
+        participant_ids = [p.id for p in page]
+        email_statuses = {}
+        for log in EmailLog.objects.filter(participant_id__in=participant_ids).values('participant_id', 'status').order_by('participant_id', '-created_at'):
+            if log['participant_id'] not in email_statuses:
+                email_statuses[log['participant_id']] = log['status']
+
         serializer = ParticipantTableSerializer(
             page,
             many=True,
             context={
                 'universities': universities,
                 'request': request,
-                'validations': validations,  # 👈
+                'validations': validations,
+                'email_statuses': email_statuses,
             }
         )
 

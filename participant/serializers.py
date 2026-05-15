@@ -309,6 +309,7 @@ class ParticipantTableSerializer(serializers.ModelSerializer):
     is_validated = serializers.SerializerMethodField()
     discapacidad = serializers.SerializerMethodField()
     alergia = serializers.SerializerMethodField()
+    email_status = serializers.SerializerMethodField()
 
     class Meta:
         model = Participant
@@ -337,6 +338,7 @@ class ParticipantTableSerializer(serializers.ModelSerializer):
             'is_validated',
             'discapacidad',
             'alergia',
+            'email_status',
         ]
 
     def get_full_name(self, obj):
@@ -425,5 +427,12 @@ class ParticipantTableSerializer(serializers.ModelSerializer):
             is_active=True,
         ).first()
         return condition.description if condition else ''
+
+    def get_email_status(self, obj):
+        email_statuses = self.context.get('email_statuses', {})
+        status = email_statuses.get(obj.id)
+        if status is None:
+            return 'nobody'
+        return 'sent' if status == 'sent' else 'error'
 
 

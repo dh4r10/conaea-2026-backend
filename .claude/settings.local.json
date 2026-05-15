@@ -11,7 +11,8 @@
       "Bash(dir D:\\\\Personal Projects\\\\CONAEA\\\\conanea-backend *)",
       "Bash(venv\\\\Scripts\\\\python -c \"from security.views import EmailLogListView; print\\('OK'\\)\")",
       "Bash(\"venv/Scripts/python.exe\" -c \"from security.views import EmailLogListView; print\\('OK'\\)\")",
-      "Bash(DJANGO_SETTINGS_MODULE=congress.settings \"venv/Scripts/python.exe\" -c \"import django; django.setup\\(\\); from security.views import EmailLogListView; print\\('OK'\\)\")"
+      "Bash(DJANGO_SETTINGS_MODULE=congress.settings \"venv/Scripts/python.exe\" -c \"import django; django.setup\\(\\); from security.views import EmailLogListView; print\\('OK'\\)\")",
+      "WebFetch(domain:docs.mailtrap.io)"
     ]
   }
 }

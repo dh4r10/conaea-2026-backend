@@ -153,12 +153,20 @@ class ValidationAdminViewSet(viewsets.ViewSet):
 
                     # ✅ Verificar si el envío de correos está habilitado
                     if settings.AVAILABLE_EMAILS:
-                        import threading
-                        hilo = threading.Thread(target=send_welcome_email, args=(participant,))
-                        hilo.daemon = True
-                        hilo.start()
-                        email_status = 'sent'
-                        error_message = None
+                        # 📌 Verificar suppression ANTES de enviar
+                        suppression = check_mailtrap_suppression(participant.email)
+                        if suppression:
+                            email_status = 'bounced'
+                            suppression_type = suppression.get('type', 'suppression')
+                            esp_response = suppression.get('message_esp_response') or ''
+                            error_message = f"{suppression_type} — {esp_response}".strip(' —')
+                        else:
+                            import threading
+                            hilo = threading.Thread(target=send_welcome_email, args=(participant,))
+                            hilo.daemon = True
+                            hilo.start()
+                            email_status = 'sent'
+                            error_message = None
                     else:
                         email_status = 'disabled'
                         error_message = 'El envío de correos está deshabilitado por configuración.'
@@ -166,17 +174,6 @@ class ValidationAdminViewSet(viewsets.ViewSet):
                 except Exception as e:
                     email_status = 'failed'
                     error_message = str(e)
-
-                # 📌 Verificar suppressions en Mailtrap
-                if participant and participant.email and email_status == 'sent':
-                    suppression = check_mailtrap_suppression(participant.email)
-
-                    if suppression:
-                        email_status = 'bounced'
-                        esp_response = suppression.get("message_esp_response")
-                        error_message = esp_response
-                    else:
-                        email_status = 'sent'
 
                 # Registrar el resultado en EmailLog si existe el participante
                 if participant:

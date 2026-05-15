@@ -4,6 +4,11 @@ from django.conf import settings
 
 
 def check_mailtrap_suppression(email: str):
+    """
+    Consulta la API de Mailtrap y devuelve el registro de supresión si el email
+    está bloqueado por cualquier motivo (hard bounce, unsubscription, spam complaint,
+    manual import, etc.). Devuelve None si el email puede recibir correos.
+    """
     url = f"https://mailtrap.io/api/accounts/{settings.MAILTRAP_ACCOUNT_ID}/suppressions"
 
     headers = {
@@ -11,22 +16,16 @@ def check_mailtrap_suppression(email: str):
         "Content-Type": "application/json",
     }
 
-    params = {
-        "email": email
-    }
-
     try:
-        response = requests.get(url, headers=headers, params=params, timeout=10)
+        response = requests.get(url, headers=headers, params={"email": email}, timeout=10)
         response.raise_for_status()
         suppressions = response.json()
 
         if suppressions:
-            suppression = suppressions[0]
-            if suppression.get("type", "").lower() == "hard bounce":
-                return suppression
+            return suppressions[0]
 
         return None
 
     except requests.RequestException as e:
-        print(f"Error consultando Mailtrap: {e}")
+        print(f"Error consultando Mailtrap suppressions: {e}")
         return None
