@@ -24,6 +24,11 @@ from participant.pagination import StandardPagination
 
 from .services.email_service import send_welcome_email
 
+import json
+import time
+from django.http import StreamingHttpResponse, HttpResponse
+from django.views import View
+
 # Create your views here.
 
 class PersonalDataViewSet(viewsets.ModelViewSet):
@@ -153,38 +158,59 @@ class ValidationAdminViewSet(viewsets.ViewSet):
 
                     # ✅ Verificar si el envío de correos está habilitado
                     if settings.AVAILABLE_EMAILS:
-                        # 📌 Verificar suppression ANTES de enviar
-                        suppression = check_mailtrap_suppression(participant.email)
-                        if suppression:
-                            email_status = 'bounced'
-                            suppression_type = suppression.get('type', 'suppression')
-                            esp_response = suppression.get('message_esp_response') or ''
-                            error_message = f"{suppression_type} — {esp_response}".strip(' —')
-                        else:
-                            import threading
-                            hilo = threading.Thread(target=send_welcome_email, args=(participant,))
-                            hilo.daemon = True
-                            hilo.start()
-                            email_status = 'sent'
-                            error_message = None
+                        import threading
+
+                        def send_and_log(p):
+                            try:
+                                send_welcome_email(p)
+                                suppression = check_mailtrap_suppression(p.email)
+                                if suppression:
+                                    suppression_type = suppression.get('type', 'suppression')
+                                    esp_response = suppression.get('message_esp_response') or ''
+                                    log_status = 'bounced'
+                                    log_error = f"{suppression_type} — {esp_response}".strip(' —')
+                                    log_sent_at = None
+                                else:
+                                    log_status = 'sent'
+                                    log_error = None
+                                    log_sent_at = timezone.now()
+                            except Exception as exc:
+                                log_status = 'failed'
+                                log_error = str(exc)
+                                log_sent_at = None
+
+                            EmailLog.objects.create(
+                                participant=p,
+                                subject='¡Bienvenido al XXXII CONAEA Tarapoto 2026!',
+                                email_type='validation',
+                                status=log_status,
+                                error_message=log_error,
+                                sent_at=log_sent_at,
+                            )
+
+                        hilo = threading.Thread(target=send_and_log, args=(participant,))
+                        hilo.daemon = True
+                        hilo.start()
                     else:
-                        email_status = 'disabled'
-                        error_message = 'El envío de correos está deshabilitado por configuración.'
+                        EmailLog.objects.create(
+                            participant=participant,
+                            subject='¡Bienvenido al XXXII CONAEA Tarapoto 2026!',
+                            email_type='validation',
+                            status='disabled',
+                            error_message='El envío de correos está deshabilitado por configuración.',
+                            sent_at=None,
+                        )
 
                 except Exception as e:
-                    email_status = 'failed'
-                    error_message = str(e)
-
-                # Registrar el resultado en EmailLog si existe el participante
-                if participant:
-                    EmailLog.objects.create(
-                        participant=participant,
-                        subject='¡Bienvenido al XXXII CONAEA Tarapoto 2026!',
-                        email_type='validation',
-                        status=email_status,
-                        error_message=error_message,
-                        sent_at=timezone.now() if email_status == 'sent' else None,
-                    )
+                    if participant:
+                        EmailLog.objects.create(
+                            participant=participant,
+                            subject='¡Bienvenido al XXXII CONAEA Tarapoto 2026!',
+                            email_type='validation',
+                            status='failed',
+                            error_message=str(e),
+                            sent_at=None,
+                        )
 
             return Response({'validated': True}, status=status.HTTP_201_CREATED)
 
@@ -323,6 +349,130 @@ class EmailLogListView(APIView):
         page = paginator.paginate_queryset(logs, request)
         serializer = EmailLogSerializer(page, many=True)
         return paginator.get_paginated_response(serializer.data)
+
+
+class ResendEmailView(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request):
+        from participant.models import Participant
+
+        participant_id = request.data.get('participant_id')
+        if not participant_id:
+            return Response(
+                {'detail': 'El campo participant_id es requerido.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        try:
+            participant = Participant.objects.select_related(
+                'registration__quota_type',
+                'registration__pre_sale',
+            ).get(pk=participant_id, is_active=True)
+        except Participant.DoesNotExist:
+            return Response(
+                {'detail': 'Participante no encontrado.'},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        if not participant.registration_id:
+            return Response(
+                {'detail': 'El participante no tiene una inscripción asociada.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        if not settings.AVAILABLE_EMAILS:
+            return Response(
+                {'detail': 'El envío de correos está deshabilitado por configuración.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        import threading
+
+        def send_and_log(p):
+            try:
+                send_welcome_email(p)
+                suppression = check_mailtrap_suppression(p.email)
+                if suppression:
+                    suppression_type = suppression.get('type', 'suppression')
+                    esp_response = suppression.get('message_esp_response') or ''
+                    log_status = 'bounced'
+                    log_error = f"{suppression_type} — {esp_response}".strip(' —')
+                    log_sent_at = None
+                else:
+                    log_status = 'sent'
+                    log_error = None
+                    log_sent_at = timezone.now()
+            except Exception as exc:
+                log_status = 'failed'
+                log_error = str(exc)
+                log_sent_at = None
+
+            EmailLog.objects.create(
+                participant=p,
+                subject='¡Bienvenido al XXXII CONAEA Tarapoto 2026!',
+                email_type='validation',
+                status=log_status,
+                error_message=log_error,
+                sent_at=log_sent_at,
+            )
+
+        hilo = threading.Thread(target=send_and_log, args=(participant,))
+        hilo.daemon = True
+        hilo.start()
+
+        return Response({'detail': 'Email reenviado correctamente.'})
+
+
+class EmailStatusSSEView(View):
+    """
+    GET /api/security/email-status/sse/?participant_id=X
+    Mantiene la conexión abierta y emite el estado del último EmailLog
+    del participante en cuanto el hilo de envío lo escribe.
+    Cierra la conexión al recibir un estado definitivo (sent, bounced, failed, disabled).
+    """
+    TERMINAL_STATUSES = {'sent', 'bounced', 'failed', 'disabled'}
+    TIMEOUT_SECONDS = 60
+
+    def get(self, request):
+        participant_id = request.GET.get('participant_id', '').strip()
+        if not participant_id:
+            return HttpResponse('participant_id requerido', status=400)
+
+        # ID del último log ANTES de que llegue la solicitud, para detectar uno nuevo
+        last_log = (
+            EmailLog.objects.filter(participant_id=participant_id)
+            .order_by('-created_at')
+            .values('id', 'status')
+            .first()
+        )
+        seen_id = last_log['id'] if last_log else None
+
+        def event_stream():
+            deadline = time.time() + self.TIMEOUT_SECONDS
+            while time.time() < deadline:
+                try:
+                    new_log = (
+                        EmailLog.objects.filter(participant_id=participant_id)
+                        .order_by('-created_at')
+                        .values('id', 'status', 'error_message')
+                        .first()
+                    )
+                    if new_log and new_log['id'] != seen_id:
+                        yield f"data: {json.dumps({'status': new_log['status'], 'error': new_log['error_message']})}\n\n"
+                        if new_log['status'] in self.TERMINAL_STATUSES:
+                            return
+                    time.sleep(1)
+                except GeneratorExit:
+                    return
+                except Exception:
+                    return
+            yield f"data: {json.dumps({'status': 'timeout'})}\n\n"
+
+        response = StreamingHttpResponse(event_stream(), content_type='text/event-stream')
+        response['Cache-Control'] = 'no-cache'
+        response['X-Accel-Buffering'] = 'no'
+        return response
 
 
 class DashboardView(APIView):

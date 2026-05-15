@@ -310,6 +310,8 @@ class ParticipantTableSerializer(serializers.ModelSerializer):
     discapacidad = serializers.SerializerMethodField()
     alergia = serializers.SerializerMethodField()
     email_status = serializers.SerializerMethodField()
+    fecha = serializers.SerializerMethodField()
+    hora = serializers.SerializerMethodField()
 
     class Meta:
         model = Participant
@@ -339,6 +341,8 @@ class ParticipantTableSerializer(serializers.ModelSerializer):
             'discapacidad',
             'alergia',
             'email_status',
+            'fecha',
+            'hora',
         ]
 
     def get_full_name(self, obj):
@@ -434,5 +438,20 @@ class ParticipantTableSerializer(serializers.ModelSerializer):
         if status is None:
             return 'nobody'
         return 'sent' if status == 'sent' else 'error'
+
+    def _registration_created_at_lima(self, obj):
+        from zoneinfo import ZoneInfo
+        created_at = obj.registration.created_at if obj.registration else None
+        if not created_at:
+            return None
+        return created_at.astimezone(ZoneInfo('America/Lima'))
+
+    def get_fecha(self, obj):
+        dt = self._registration_created_at_lima(obj)
+        return dt.strftime('%d/%m/%Y') if dt else None
+
+    def get_hora(self, obj):
+        dt = self._registration_created_at_lima(obj)
+        return dt.strftime('%H:%M:%S') if dt else None
 
 

@@ -374,6 +374,13 @@ class ParticipantUpdateView(APIView):
 
         participant.save()
 
+        # ── Eliminar validación de registration al editar ──────────────
+        if participant.registration_id:
+            Validation.objects.filter(
+                model='registration',
+                register_id=participant.registration_id,
+            ).delete()
+
         # ── Condiciones especiales ─────────────────────────────────────
         SPECIAL_CONDITION_IDS = {'discapacidad': 1, 'alergia': 2}
 
@@ -525,15 +532,14 @@ class ParticipantTableView(APIView):
         )
 
         response = paginator.get_paginated_response(serializer.data)
-        pre_sales_qs = list(PreSale.objects.filter(is_active=True).values('id', 'name', 'start_date'))
-        if len(pre_sales_qs) == 1:
-            default_id = pre_sales_qs[0]['id']
-        elif len(pre_sales_qs) > 1:
-            now = timezone.now()
-            started = [p for p in pre_sales_qs if p['start_date'] <= now]
-            default_id = max(started, key=lambda p: p['start_date'])['id'] if started else pre_sales_qs[0]['id']
+        pre_sales_qs = list(PreSale.objects.filter(is_active=True).values('id', 'name', 'start_date', 'end_date'))
+        now = timezone.now()
+        in_range = [p for p in pre_sales_qs if p['start_date'] <= now <= p['end_date']]
+        if in_range:
+            default_id = in_range[0]['id']
         else:
-            default_id = None
+            past = [p for p in pre_sales_qs if p['start_date'] < now]
+            default_id = max(past, key=lambda p: p['start_date'])['id'] if past else None
         response.data['pre_sales'] = [
             {'id': p['id'], 'name': p['name'], 'is_default': p['id'] == default_id}
             for p in pre_sales_qs
