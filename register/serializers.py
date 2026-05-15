@@ -7,6 +7,31 @@ class PreSaleSerializer(serializers.ModelSerializer):
         model = PreSale
         fields = '__all__'
 
+    def validate(self, data):
+        start = data.get('start_date', getattr(self.instance, 'start_date', None))
+        end = data.get('end_date', getattr(self.instance, 'end_date', None))
+
+        if start and end and start >= end:
+            raise serializers.ValidationError(
+                {'end_date': 'La fecha de fin debe ser posterior a la fecha de inicio.'}
+            )
+
+        if start and end:
+            qs = PreSale.objects.filter(
+                is_active=True,
+                start_date__lt=end,
+                end_date__gt=start,
+            )
+            if self.instance:
+                qs = qs.exclude(pk=self.instance.pk)
+            if qs.exists():
+                names = ', '.join(qs.values_list('name', flat=True))
+                raise serializers.ValidationError(
+                    {'non_field_errors': f'El rango de fechas se cruza con: {names}.'}
+                )
+
+        return data
+
 
 class QuotaTypeSerializer(serializers.ModelSerializer):
     class Meta:

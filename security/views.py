@@ -355,6 +355,7 @@ class DashboardView(APIView):
                 'name': active_pre_sale.name,
                 'start_date': active_pre_sale.start_date,
                 'end_date': active_pre_sale.end_date,
+                'booking_mode': active_pre_sale.booking_mode,
                 'slots': slots,
             }
 

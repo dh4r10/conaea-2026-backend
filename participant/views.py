@@ -147,7 +147,7 @@ class PartnerUniversityViewSet(viewsets.ModelViewSet):
         if quota_type_id:
             queryset = queryset.filter(quota_type_id=quota_type_id)
         if search:
-            queryset = queryset.filter(name__icontains=search)
+            queryset = queryset.filter(Q(name__icontains=search) | Q(abbreviation__icontains=search))
         return queryset
 
     def list(self, request, *args, **kwargs):
