@@ -218,11 +218,22 @@ def send_welcome_email(participant):
                 </tr>
 
                 <tr style="background:#fafafa;">
-                  <td style="padding:14px 20px;font-size:12px;color:#999999;">
+                  <td style="padding:14px 20px;font-size:12px;color:#999999;
+                    border-bottom:1px solid #eeeeee;">
                     Universidad
                   </td>
-                  <td style="padding:14px 20px;font-size:12px;color:#111111;font-weight:700;">
+                  <td style="padding:14px 20px;font-size:12px;color:#111111;font-weight:700;
+                    border-bottom:1px solid #eeeeee;">
                     {university_name}
+                  </td>
+                </tr>
+
+                <tr>
+                  <td style="padding:14px 20px;font-size:12px;color:#999999;">
+                    Teléfono
+                  </td>
+                  <td style="padding:14px 20px;font-size:12px;color:#111111;font-weight:700;">
+                    {participant.cellphone}
                   </td>
                 </tr>
 

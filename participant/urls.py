@@ -11,7 +11,9 @@ from .views import (
     ParticipantValidationView,
     PartnerUniversityViewSet,
     DelegateViewSet,
-    ParticipantByIdentityView
+    ParticipantByIdentityView,
+    RequestOTPView,
+    VerifyOTPView,
 )
 
 router = routers.DefaultRouter()
@@ -26,6 +28,8 @@ router.register('delegates', DelegateViewSet, basename='delegate')
 urlpatterns = [
     path('participants/', include(router.urls)),
     path('participants/validate/', ParticipantValidationView.as_view(), name='participant_validate'),
+    path('participants/by-identity/request-otp/', RequestOTPView.as_view(), name='participant_request_otp'),
+    path('participants/by-identity/verify-otp/', VerifyOTPView.as_view(), name='participant_verify_otp'),
     path('participants/by-identity/', ParticipantByIdentityView.as_view(), name='participant_by_identity'),
     path('participants/table/', ParticipantTableView.as_view(), name='participant-table'),
     path('participants/stats/', ParticipantStatsView.as_view(), name='participant_stats'),

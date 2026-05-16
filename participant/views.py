@@ -1,12 +1,60 @@
+import logging
+import random
+import requests as http_requests
+from datetime import timedelta
+
+logger = logging.getLogger(__name__)
+
+from django.utils import timezone
 from rest_framework import viewsets, permissions, status
 from rest_framework.views import APIView
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.parsers import MultiPartParser, FormParser
 
-from .models import SpecialCondition, Participant, ParticipantSpecialCondition, Enrollment, PartnerUniversity, Delegate
+from .models import SpecialCondition, Participant, ParticipantSpecialCondition, Enrollment, PartnerUniversity, Delegate, OTPCode
 from security.models import Validation
 from register.models import AvailableSlot, QuotaType, PreSale
+
+_WHATSAPP_API_URL = 'https://waba-template-production.up.railway.app/api/v1/template-public/security-code'
+_WHATSAPP_PSSW = '72580644-a24c-4862-8a06-29d9c1925617'
+_OTP_EXPIRY_MINUTES = 5
+
+
+def _validate_document_format(document, document_type):
+    if document_type not in ('DNI', 'PASAPORTE'):
+        return 'El tipo de documento debe ser DNI o PASAPORTE'
+    if document_type == 'DNI':
+        if not document.isdigit() or len(document) != 8:
+            return 'El DNI debe tener exactamente 8 dígitos numéricos'
+    else:
+        if not document.isalnum() or len(document) > 11:
+            return 'El pasaporte debe ser alfanumérico y tener como máximo 11 caracteres'
+    return None
+
+
+def _format_phone(cellphone: str) -> str:
+    return ''.join(c for c in cellphone if c.isdigit())
+
+
+def _mask_phone(cellphone: str) -> str:
+    phone = cellphone.strip()
+    visible = phone[-3:] if len(phone) >= 3 else phone
+    return '*' * (len(phone) - len(visible)) + visible
+
+
+def _send_otp_whatsapp(phone: str, code: str) -> tuple[bool, str]:
+    payload = {'telefono': phone, 'codigo': code, 'pssw': _WHATSAPP_PSSW}
+    logger.info('OTP WhatsApp → %s | payload: %s', _WHATSAPP_API_URL, payload)
+    try:
+        resp = http_requests.post(_WHATSAPP_API_URL, json=payload, timeout=10)
+        logger.info('OTP WhatsApp ← status=%s body=%s', resp.status_code, resp.text[:300])
+        if resp.status_code < 400:
+            return True, ''
+        return False, f'API respondió {resp.status_code}: {resp.text[:200]}'
+    except http_requests.RequestException as exc:
+        logger.error('OTP WhatsApp error de red: %s', exc)
+        return False, str(exc)
 from .serializers import (
     ParticipantTableSerializer,
     SpecialConditionSerializer,
@@ -554,4 +602,140 @@ class ParticipantTableView(APIView):
         ]
         response.data['quota_types'] = list(QuotaType.objects.filter(is_active=True).values('id', 'name'))
         return response
-    
+
+
+class RequestOTPView(APIView):
+    permission_classes = [permissions.AllowAny]
+
+    def post(self, request):
+        document = request.data.get('document', '').strip()
+        document_type = request.data.get('document_type', 'DNI').strip().upper()
+
+        if not document:
+            return Response({'error': 'El documento es requerido'}, status=status.HTTP_400_BAD_REQUEST)
+
+        error = _validate_document_format(document, document_type)
+        if error:
+            return Response({'error': error}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            participant = Participant.objects.get(
+                identity_document=document,
+                document_type=document_type,
+                is_active=True,
+            )
+        except Participant.DoesNotExist:
+            return Response(
+                {'error': 'No se encontró ningún participante con ese documento'},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        if not participant.cellphone:
+            return Response(
+                {'error': 'El participante no tiene un número de teléfono registrado'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        code = ''.join(random.choices('0123456789', k=6))
+        expires_at = timezone.now() + timedelta(minutes=_OTP_EXPIRY_MINUTES)
+
+        OTPCode.objects.filter(document=document, document_type=document_type).delete()
+        OTPCode.objects.create(
+            document=document,
+            document_type=document_type,
+            code=code,
+            expires_at=expires_at,
+        )
+
+        phone = _format_phone(participant.cellphone)
+        sent, detail = _send_otp_whatsapp(phone, code)
+        if not sent:
+            return Response(
+                {'error': 'No se pudo enviar el código OTP. Intenta nuevamente.', 'detail': detail},
+                status=status.HTTP_503_SERVICE_UNAVAILABLE,
+            )
+
+        return Response({
+            'message': f'Código enviado al número terminado en {_mask_phone(participant.cellphone)}',
+            'phone_hint': _mask_phone(participant.cellphone),
+            'expires_in': _OTP_EXPIRY_MINUTES * 60,
+        }, status=status.HTTP_200_OK)
+
+
+class VerifyOTPView(APIView):
+    permission_classes = [permissions.AllowAny]
+
+    def post(self, request):
+        document = request.data.get('document', '').strip()
+        document_type = request.data.get('document_type', 'DNI').strip().upper()
+        otp = request.data.get('otp', '').strip()
+
+        if not document or not otp:
+            return Response(
+                {'error': 'Los campos document y otp son requeridos'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        error = _validate_document_format(document, document_type)
+        if error:
+            return Response({'error': error}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            otp_record = OTPCode.objects.get(document=document, document_type=document_type)
+        except OTPCode.DoesNotExist:
+            return Response(
+                {'error': 'No hay un código OTP pendiente para este documento. Solicita uno nuevo.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        if timezone.now() > otp_record.expires_at:
+            otp_record.delete()
+            return Response(
+                {'error': 'El código OTP ha expirado. Solicita uno nuevo.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        if otp_record.code != otp:
+            return Response(
+                {'error': 'Código OTP incorrecto'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        otp_record.delete()
+
+        try:
+            participant = Participant.objects.select_related(
+                'registration__quota_type',
+                'registration__pre_sale',
+            ).get(
+                identity_document=document,
+                document_type=document_type,
+                is_active=True,
+            )
+        except Participant.DoesNotExist:
+            return Response(
+                {'error': 'No se encontró ningún participante con ese documento'},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        try:
+            slot = AvailableSlot.objects.get(
+                pre_sale=participant.registration.pre_sale,
+                quota_type=participant.registration.quota_type,
+                is_active=True,
+            )
+            mount = slot.mount
+        except AvailableSlot.DoesNotExist:
+            mount = None
+
+        return Response({
+            'participant_id': participant.id,
+            'registration_id': participant.registration.id,
+            'registration_uuid': str(participant.registration.uuid),
+            'full_name': f"{participant.first_name} {participant.paternal_surname} {participant.maternal_surname}",
+            'email': participant.email,
+            'university_type': participant.university_type,
+            'quota_type': participant.registration.quota_type.name,
+            'currency': participant.registration.quota_type.currency,
+            'mount': mount,
+        }, status=status.HTTP_200_OK)

@@ -3,6 +3,7 @@ import string
 import random
 from PIL import Image
 from django.db import models
+from django.utils import timezone
 from register.models import Registration, QuotaType
 from django.core.files.base import ContentFile
 
@@ -152,6 +153,17 @@ class PartnerUniversity(models.Model):
     class Meta:
         db_table = 'partner_universities'
         ordering = ['name']
+
+
+class OTPCode(models.Model):
+    document = models.CharField(max_length=20)
+    document_type = models.CharField(max_length=20)
+    code = models.CharField(max_length=6)
+    expires_at = models.DateTimeField()
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = 'otp_codes'
 
 
 class Delegate(models.Model):
