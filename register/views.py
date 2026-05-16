@@ -67,6 +67,25 @@ class PreSaleViewSet(viewsets.ModelViewSet):
     serializer_class = PreSaleSerializer
     permission_classes = [permissions.AllowAny]
 
+    def update(self, request, *args, **kwargs):
+        instance = self.get_object()
+
+        new_is_active = request.data.get('is_active')
+        if new_is_active is not None and str(new_is_active).lower() in ('false', '0') and instance.is_active:
+            slots_count = AvailableSlot.objects.filter(pre_sale=instance, is_active=True).count()
+            if slots_count:
+                return Response(
+                    {'detail': f'No se puede desactivar la preventa porque tiene {slots_count} cupo{"s" if slots_count != 1 else ""} asociado{"s" if slots_count != 1 else ""}.'},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+
+        was_booking = instance.booking_mode
+        response = super().update(request, *args, **kwargs)
+        instance.refresh_from_db(fields=['booking_mode'])
+        if was_booking and not instance.booking_mode:
+            IndividualCup.objects.filter(pre_sale=instance, is_active=True).update(is_active=False)
+        return response
+
     @action(detail=True, methods=['get'], url_path='slots')
     def slots(self, request, pk=None):
         """
@@ -83,6 +102,18 @@ class QuotaTypeViewSet(viewsets.ModelViewSet):
     queryset = QuotaType.objects.filter(is_active=True)
     serializer_class = QuotaTypeSerializer
     permission_classes = [permissions.AllowAny]
+
+    def update(self, request, *args, **kwargs):
+        instance = self.get_object()
+        new_is_active = request.data.get('is_active')
+        if new_is_active is not None and str(new_is_active).lower() in ('false', '0') and instance.is_active:
+            slots_count = AvailableSlot.objects.filter(quota_type=instance, is_active=True).count()
+            if slots_count:
+                return Response(
+                    {'detail': f'No se puede desactivar el tipo de cuota porque tiene {slots_count} cupo{"s" if slots_count != 1 else ""} asociado{"s" if slots_count != 1 else ""}.'},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+        return super().update(request, *args, **kwargs)
 
 
 class AvailableSlotViewSet(viewsets.ModelViewSet):
@@ -116,6 +147,20 @@ class AvailableSlotViewSet(viewsets.ModelViewSet):
     def update(self, request, *args, **kwargs):
         from django.db.models import Sum
         instance = self.get_object()
+
+        new_is_active = request.data.get('is_active')
+        if new_is_active is not None and str(new_is_active).lower() in ('false', '0') and instance.is_active:
+            enrolled = Registration.objects.filter(
+                pre_sale=instance.pre_sale,
+                quota_type=instance.quota_type,
+                is_active=True,
+            ).count()
+            if enrolled:
+                return Response(
+                    {'detail': f'No se puede desactivar el cupo porque hay {enrolled} participante{"s" if enrolled != 1 else ""} inscrito{"s" if enrolled != 1 else ""}.'},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+
         new_amount = request.data.get('amount')
 
         if new_amount is not None:
@@ -126,17 +171,21 @@ class AvailableSlotViewSet(viewsets.ModelViewSet):
                     {'amount': 'Debe ser un número entero.'},
                     status=status.HTTP_400_BAD_REQUEST
                 )
-            total_reserved = IndividualCup.objects.filter(
-                pre_sale=instance.pre_sale,
-                partner_university__quota_type=instance.quota_type,
-                is_active=True,
-            ).aggregate(total=Sum('currency'))['total'] or 0
 
-            if new_amount < total_reserved:
-                return Response(
-                    {'amount': f'La cantidad no puede ser menor a los cupos ya reservados por universidades ({total_reserved}).'},
-                    status=status.HTTP_400_BAD_REQUEST
-                )
+            booking_mode = instance.pre_sale.booking_mode
+
+            if booking_mode:
+                total_reserved = IndividualCup.objects.filter(
+                    pre_sale=instance.pre_sale,
+                    partner_university__quota_type=instance.quota_type,
+                    is_active=True,
+                ).aggregate(total=Sum('currency'))['total'] or 0
+
+                if new_amount < total_reserved:
+                    return Response(
+                        {'amount': f'La cantidad no puede ser menor a los cupos ya reservados por universidades ({total_reserved}).'},
+                        status=status.HTTP_400_BAD_REQUEST
+                    )
 
             used_total = Registration.objects.filter(
                 pre_sale=instance.pre_sale,
@@ -150,25 +199,26 @@ class AvailableSlotViewSet(viewsets.ModelViewSet):
                     status=status.HTTP_400_BAD_REQUEST
                 )
 
-            reserved_codes = list(
-                IndividualCup.objects.filter(
-                    pre_sale=instance.pre_sale,
-                    partner_university__quota_type=instance.quota_type,
-                    is_active=True,
-                ).values_list('partner_university__code', flat=True)
-            )
-            used_reserved = Participant.objects.filter(
-                cod_university__in=reserved_codes,
-                is_active=True,
-            ).count() if reserved_codes else 0
-
-            free_slots = new_amount - total_reserved
-            non_reserved_enrollees = used_total - used_reserved
-            if free_slots < non_reserved_enrollees:
-                return Response(
-                    {'amount': f'Los cupos libres resultantes ({free_slots}) no alcanzan para los inscritos fuera de reserva ({non_reserved_enrollees}).'},
-                    status=status.HTTP_400_BAD_REQUEST
+            if booking_mode:
+                reserved_codes = list(
+                    IndividualCup.objects.filter(
+                        pre_sale=instance.pre_sale,
+                        partner_university__quota_type=instance.quota_type,
+                        is_active=True,
+                    ).values_list('partner_university__code', flat=True)
                 )
+                used_reserved = Participant.objects.filter(
+                    cod_university__in=reserved_codes,
+                    is_active=True,
+                ).count() if reserved_codes else 0
+
+                free_slots = new_amount - total_reserved
+                non_reserved_enrollees = used_total - used_reserved
+                if free_slots < non_reserved_enrollees:
+                    return Response(
+                        {'amount': f'Los cupos libres resultantes ({free_slots}) no alcanzan para los inscritos fuera de reserva ({non_reserved_enrollees}).'},
+                        status=status.HTTP_400_BAD_REQUEST
+                    )
 
         return super().update(request, *args, **kwargs)
 
@@ -180,6 +230,11 @@ class AvailableSlotViewSet(viewsets.ModelViewSet):
 
         pre_sale_ids = {slot.pre_sale_id for slot in queryset}
 
+        booking_mode_map = {
+            p['id']: p['booking_mode']
+            for p in PreSale.objects.filter(id__in=pre_sale_ids).values('id', 'booking_mode')
+        }
+
         # used_total: inscritos por (pre_sale, quota_type)
         reg_counts = (
             Registration.objects.filter(pre_sale_id__in=pre_sale_ids, is_active=True)
@@ -188,16 +243,17 @@ class AvailableSlotViewSet(viewsets.ModelViewSet):
         )
         used_total_map = {(r['pre_sale_id'], r['quota_type_id']): r['count'] for r in reg_counts}
 
-        # used_reserved: participantes de universidades con IndividualCup para ese (pre_sale, quota_type)
-        cups = IndividualCup.objects.filter(
-            pre_sale_id__in=pre_sale_ids,
-            is_active=True,
-        ).values('pre_sale_id', 'partner_university__quota_type_id', 'partner_university__code')
-
+        # used_reserved: solo relevante cuando booking_mode=True
+        booking_pre_sale_ids = {pid for pid, bm in booking_mode_map.items() if bm}
         code_to_keys = defaultdict(list)
-        for cup in cups:
-            key = (cup['pre_sale_id'], cup['partner_university__quota_type_id'])
-            code_to_keys[cup['partner_university__code']].append(key)
+        if booking_pre_sale_ids:
+            cups = IndividualCup.objects.filter(
+                pre_sale_id__in=booking_pre_sale_ids,
+                is_active=True,
+            ).values('pre_sale_id', 'partner_university__quota_type_id', 'partner_university__code')
+            for cup in cups:
+                key = (cup['pre_sale_id'], cup['partner_university__quota_type_id'])
+                code_to_keys[cup['partner_university__code']].append(key)
 
         used_reserved_map = defaultdict(int)
         if code_to_keys:
@@ -212,8 +268,11 @@ class AvailableSlotViewSet(viewsets.ModelViewSet):
 
         for item, slot in zip(data, queryset):
             key = (slot.pre_sale_id, slot.quota_type_id)
+            booking = booking_mode_map.get(slot.pre_sale_id, False)
             item['used_total'] = used_total_map.get(key, 0)
-            item['used_reserved'] = used_reserved_map.get(key, 0)
+            item['used_reserved'] = used_reserved_map.get(key, 0) if booking else 0
+            if not booking:
+                item['reserved'] = 0
 
         return Response({
             'pre_sales': get_pre_sales_with_default(),

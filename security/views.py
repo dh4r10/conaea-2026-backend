@@ -16,7 +16,6 @@ from rest_framework.decorators import action
 from rest_framework.response import Response
 from django.conf import settings
 from rest_framework import status
-from django.db.models import Sum
 
 from .models import EmailLog
 from django.utils import timezone
@@ -479,28 +478,138 @@ class DashboardView(APIView):
     permission_classes = [permissions.IsAuthenticated]
 
     def get(self, request):
-        from participant.models import Participant
-        from register.models import AvailableSlot, DynamicCode, PreSale
-        from activity.models import Speaker, Day
+        from django.db.models import Count, Sum
+        from django.db.models.functions import TruncDate
+        from participant.models import Participant, PartnerUniversity, Delegate
+        from register.models import AvailableSlot, DynamicCode, PreSale, Registration, IndividualCup
+        from activity.models import Speaker, Day, Activity
 
+        # ── Participants ──────────────────────────────────────────
         total_p = Participant.objects.filter(is_active=True).count()
         validated_ids = Validation.objects.filter(model='registration').values_list('register_id', flat=True)
         validated_p = Participant.objects.filter(is_active=True, registration_id__in=validated_ids).count()
 
+        by_date = list(
+            Registration.objects.filter(is_active=True)
+            .annotate(date=TruncDate('created_at'))
+            .values('date')
+            .annotate(count=Count('id'))
+            .order_by('date')
+        )
+        by_quota_type = list(
+            Registration.objects.filter(is_active=True)
+            .values('quota_type__name')
+            .annotate(count=Count('id'))
+            .order_by('-count')
+        )
+        by_pre_sale_participants = list(
+            Registration.objects.filter(is_active=True)
+            .values('pre_sale__name')
+            .annotate(count=Count('id'))
+            .order_by('pre_sale__id')
+        )
+
+        # ── Slots ─────────────────────────────────────────────────
         slot_qs = AvailableSlot.objects.filter(is_active=True)
         total_slots = slot_qs.aggregate(total=Sum('amount'))['total'] or 0
+        slots_reserved = IndividualCup.objects.filter(is_active=True).aggregate(total=Sum('currency'))['total'] or 0
 
+        # ── Codes ─────────────────────────────────────────────────
         total_codes = DynamicCode.objects.filter(is_active=True).count()
         available_codes = DynamicCode.objects.filter(is_active=True, status='Disponible').count()
 
+        # ── Top universities ──────────────────────────────────────
+        top_uni_qs = list(
+            Participant.objects.filter(is_active=True)
+            .values('cod_university')
+            .annotate(count=Count('id'))
+            .order_by('-count')[:10]
+        )
+        top_codes = [r['cod_university'] for r in top_uni_qs]
+        uni_map = {u.code: u for u in PartnerUniversity.objects.filter(code__in=top_codes)}
+        top_universities = [
+            {
+                'name': uni_map[r['cod_university']].name if r['cod_university'] in uni_map else r['cod_university'],
+                'abbreviation': uni_map[r['cod_university']].abbreviation if r['cod_university'] in uni_map else '',
+                'count': r['count'],
+            }
+            for r in top_uni_qs
+        ]
+
+        # ── Delegates ─────────────────────────────────────────────
+        total_delegates = Delegate.objects.filter(is_active=True).count()
+
+        ps_uni_codes = {}
+        for row in (
+            Participant.objects.filter(is_active=True)
+            .values('cod_university', 'registration__pre_sale__name')
+            .distinct()
+        ):
+            ps_name = row['registration__pre_sale__name']
+            ps_uni_codes.setdefault(ps_name, set()).add(row['cod_university'])
+
+        all_uni_codes = set().union(*ps_uni_codes.values()) if ps_uni_codes else set()
+        del_count_by_code = {}
+        if all_uni_codes:
+            for row in (
+                Delegate.objects.filter(is_active=True, partner_university__code__in=all_uni_codes)
+                .values('partner_university__code')
+                .annotate(cnt=Count('id'))
+            ):
+                del_count_by_code[row['partner_university__code']] = row['cnt']
+
+        delegates_by_pre_sale = [
+            {'pre_sale': ps_name, 'count': sum(del_count_by_code.get(c, 0) for c in codes)}
+            for ps_name, codes in ps_uni_codes.items()
+        ]
+
+        # ── Universities ──────────────────────────────────────────
+        total_universities = PartnerUniversity.objects.filter(is_active=True).count()
+        active_uni_codes = Participant.objects.filter(is_active=True).values('cod_university').distinct()
+        with_participants = PartnerUniversity.objects.filter(is_active=True, code__in=active_uni_codes).count()
+
+        # ── Activities ────────────────────────────────────────────
+        total_activities = Activity.objects.filter(is_active=True).count()
+        activities_by_day = list(
+            Activity.objects.filter(is_active=True)
+            .values('day__title')
+            .annotate(count=Count('id'))
+            .order_by('day__date')
+        )
+
+        # ── Active pre_sale ───────────────────────────────────────
         active_pre_sale = PreSale.objects.filter(is_active=True).first()
         pre_sale_data = None
         if active_pre_sale:
-            slots = list(
-                AvailableSlot.objects.filter(pre_sale=active_pre_sale, is_active=True)
-                .values('quota_type__name', 'amount')
-                .order_by('id')
+            used_by_qt = dict(
+                Registration.objects.filter(is_active=True, pre_sale=active_pre_sale)
+                .values('quota_type_id')
+                .annotate(cnt=Count('id'))
+                .values_list('quota_type_id', 'cnt')
             )
+            reserved_by_qt = {}
+            if active_pre_sale.booking_mode:
+                for row in (
+                    IndividualCup.objects.filter(is_active=True, pre_sale=active_pre_sale)
+                    .values('partner_university__quota_type_id')
+                    .annotate(total=Sum('currency'))
+                ):
+                    reserved_by_qt[row['partner_university__quota_type_id']] = row['total']
+
+            slots = []
+            for slot in (
+                AvailableSlot.objects.filter(pre_sale=active_pre_sale, is_active=True)
+                .values('quota_type__name', 'quota_type_id', 'amount')
+                .order_by('id')
+            ):
+                qt_id = slot['quota_type_id']
+                slots.append({
+                    'quota_type__name': slot['quota_type__name'],
+                    'amount': slot['amount'],
+                    'used': used_by_qt.get(qt_id, 0),
+                    'reserved': reserved_by_qt.get(qt_id, 0) if active_pre_sale.booking_mode else 0,
+                })
+
             pre_sale_data = {
                 'name': active_pre_sale.name,
                 'start_date': active_pre_sale.start_date,
@@ -514,9 +623,14 @@ class DashboardView(APIView):
                 'total': total_p,
                 'validated': validated_p,
                 'pending': total_p - validated_p,
+                'by_date': [{'date': str(r['date']), 'count': r['count']} for r in by_date],
+                'by_quota_type': [{'quota_type': r['quota_type__name'], 'count': r['count']} for r in by_quota_type],
+                'by_pre_sale': [{'pre_sale': r['pre_sale__name'], 'count': r['count']} for r in by_pre_sale_participants],
             },
             'slots': {
                 'total': total_slots,
+                'used': total_p,
+                'reserved': slots_reserved,
                 'categories': slot_qs.count(),
             },
             'speakers': Speaker.objects.filter(is_active=True).count(),
@@ -526,6 +640,19 @@ class DashboardView(APIView):
                 'available': available_codes,
                 'used': total_codes - available_codes,
             },
+            'delegates': {
+                'total': total_delegates,
+                'by_pre_sale': delegates_by_pre_sale,
+            },
+            'universities': {
+                'total': total_universities,
+                'with_participants': with_participants,
+            },
+            'activities': {
+                'total': total_activities,
+                'by_day': [{'day': r['day__title'], 'count': r['count']} for r in activities_by_day],
+            },
+            'top_universities': top_universities,
             'active_pre_sale': pre_sale_data,
         })
 

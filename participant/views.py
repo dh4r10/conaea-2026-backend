@@ -140,7 +140,15 @@ class PartnerUniversityViewSet(viewsets.ModelViewSet):
             return PartnerUniversityDetailSerializer
         return PartnerUniversitySerializer
 
-    def get_queryset(self):  # 👈
+    def update(self, request, *args, **kwargs):
+        instance = self.get_object()
+        new_is_active = request.data.get('is_active')
+        response = super().update(request, *args, **kwargs)
+        if new_is_active is not None and str(new_is_active).lower() in ('false', '0') and instance.is_active:
+            Delegate.objects.filter(partner_university=instance, is_active=True).update(is_active=False)
+        return response
+
+    def get_queryset(self):
         queryset = PartnerUniversity.objects.filter(is_active=True).select_related('quota_type')
         quota_type_id = self.request.query_params.get('quota_type_id')
         search = self.request.query_params.get('search')
