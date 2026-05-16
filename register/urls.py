@@ -14,6 +14,8 @@ from .views import (
     VerifyCodeView,
     InscriptionView,
     AvailableSlotsRealTimeView,
+    ActivePhaseView,
+    PhasesListView,
 )
 
 router = routers.DefaultRouter()
@@ -34,4 +36,6 @@ urlpatterns = [
     path('available-slots/', AvailableSlotsRealTimeView.as_view(), name='available-slots'),
     path('available-slots/sse/', AvailableSlotsSSEView.as_view(), name='available-slots-sse'),
     path('individual-cups/sse/', IndividualCupsSSEView.as_view(), name='individual-cups-sse'),
+    path('register/active-phase/', ActivePhaseView.as_view(), name='active-phase'),
+    path('register/phases/', PhasesListView.as_view(), name='phases-list'),
 ]

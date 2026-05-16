@@ -1148,9 +1148,9 @@ class AvailableSlotsRealTimeView(APIView):
         return Response(data)
     
 
-def get_slots_data():
+def get_slots_data(pre_sale_id: int):
     with connection.cursor() as cursor:
-        cursor.execute('SELECT get_slots_data()')
+        cursor.execute('SELECT get_slots_data(%s)', [pre_sale_id])
         row = cursor.fetchone()
     return row[0]
 
@@ -1161,7 +1161,17 @@ class AvailableSlotsSSEView(View):
         def event_stream():
             while True:
                 try:
-                    data = get_slots_data()
+                    now = timezone.now()
+                    pre_sale = PreSale.objects.filter(
+                        start_date__lte=now,
+                        end_date__gte=now,
+                        is_active=True,
+                    ).values_list('id', flat=True).first()
+                    if pre_sale is None:
+                        yield f"data: {json.dumps([])}\n\n"
+                        time.sleep(10)
+                        continue
+                    data = get_slots_data(pre_sale)
                     yield f"data: {json.dumps(data)}\n\n"
                     time.sleep(10)
                 except GeneratorExit:
@@ -1176,6 +1186,123 @@ class AvailableSlotsSSEView(View):
         response['Cache-Control'] = 'no-cache'
         response['X-Accel-Buffering'] = 'no'
         return response
+
+
+class ActivePhaseView(APIView):
+    permission_classes = [permissions.AllowAny]
+
+    def get(self, request):
+        now = timezone.now()
+        pre_sale = PreSale.objects.filter(
+            start_date__lte=now,
+            end_date__gte=now,
+            is_active=True,
+        ).first()
+
+        if not pre_sale:
+            return Response({'active': False, 'current_phase': None})
+
+        slots = (
+            AvailableSlot.objects
+            .filter(pre_sale=pre_sale, is_active=True)
+            .select_related('quota_type')
+            .order_by('quota_type__category_order', 'quota_type__tier_order')
+        )
+
+        categories: dict[str, list] = {}
+        category_order: list[str] = []
+        for slot in slots:
+            qt = slot.quota_type
+            cat = qt.category or qt.name
+            if cat not in categories:
+                categories[cat] = []
+                category_order.append(cat)
+
+            benefits = qt.benefits or ''
+
+            if qt.currency == 'PEN':
+                display_price = f'S/ {slot.mount:.2f}'
+            elif qt.currency == 'USD':
+                display_price = f'${slot.mount:.2f}'
+            else:
+                display_price = f'{slot.mount:.2f}'
+
+            categories[cat].append({
+                'origin': qt.name,
+                'benefits': benefits,
+                'display_price': display_price,
+                'currency': qt.currency,
+            })
+
+        tickets = [{'category': cat, 'tiers': categories[cat]} for cat in category_order]
+
+        return Response({
+            'active': True,
+            'current_phase': {
+                'id': f'{pre_sale.pk:02d}',
+                'name': pre_sale.name,
+                'start_date': pre_sale.start_date.date().isoformat(),
+                'end_date': pre_sale.end_date.date().isoformat(),
+                'tickets': tickets,
+            },
+        })
+
+
+def _format_price(mount, currency):
+    amount = int(mount) if mount == int(mount) else mount
+    if currency == 'PEN':
+        return f'S/ {amount}'
+    if currency == 'USD':
+        return f'$ {amount}'
+    return str(amount)
+
+
+class PhasesListView(APIView):
+    permission_classes = [permissions.AllowAny]
+
+    def get(self, request):
+        now = timezone.now()
+        pre_sales = PreSale.objects.filter(is_active=True).order_by('start_date')
+
+        slots_qs = (
+            AvailableSlot.objects
+            .filter(is_active=True)
+            .select_related('quota_type')
+            .values('pre_sale_id', 'quota_type__name', 'quota_type__currency', 'mount', 'amount')
+        )
+        slots_by_presale = {}
+        for s in slots_qs:
+            slots_by_presale.setdefault(s['pre_sale_id'], []).append(s)
+
+        data = []
+        for idx, ps in enumerate(pre_sales):
+            if ps.start_date > now:
+                phase_status = 'upcoming'
+            elif ps.end_date < now:
+                phase_status = 'past'
+            else:
+                phase_status = 'active'
+
+            tiers = [
+                {
+                    'label': s['quota_type__name'],
+                    'spots': s['amount'],
+                    'price': _format_price(s['mount'], s['quota_type__currency']),
+                    'currency': s['quota_type__currency'],
+                }
+                for s in slots_by_presale.get(ps.pk, [])
+            ]
+
+            data.append({
+                'id': f'{ps.pk:02d}',
+                'name': ps.name,
+                'start_date': ps.start_date.date().isoformat(),
+                'end_date': ps.end_date.date().isoformat(),
+                'status': phase_status,
+                'tiers': tiers,
+            })
+
+        return Response(data)
 
 
 class IndividualCupsSSEView(View):

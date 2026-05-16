@@ -25,6 +25,10 @@ class PreSale(models.Model):
 class QuotaType(models.Model):
     name = models.CharField(max_length=20)
     currency = models.CharField(max_length=10)
+    category = models.CharField(max_length=50, blank=True, default='')
+    category_order = models.PositiveSmallIntegerField(default=0)
+    tier_order = models.PositiveSmallIntegerField(default=0)
+    benefits = models.TextField(null=True, blank=True)
     is_active = models.BooleanField(default=True)
 
     def __str__(self):
