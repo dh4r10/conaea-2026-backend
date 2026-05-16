@@ -23,7 +23,9 @@ from .serializers import (
     TransactionDetailSerializer,
     RefundSerializer,
     DynamicCodeSerializer,
-    DynamicCodeDetailSerializer
+    DynamicCodeDetailSerializer,
+    IndividualCupSerializer,
+    IndividualCupDetailSerializer,
 )
 from participant.serializers import ParticipantValidationSerializer
 from participant.models import PartnerUniversity, ParticipantSpecialCondition
@@ -43,6 +45,21 @@ def generate_dynamic_code():
     letters = ''.join(random.choices(string.ascii_uppercase, k=3))
     digits = ''.join(random.choices(string.digits, k=2))
     return letters + digits
+
+
+def get_pre_sales_with_default():
+    pre_sales_qs = list(PreSale.objects.filter(is_active=True).values('id', 'name', 'start_date', 'end_date'))
+    now = timezone.now()
+    in_range = [p for p in pre_sales_qs if p['start_date'] <= now <= p['end_date']]
+    if in_range:
+        default_id = in_range[0]['id']
+    else:
+        past = [p for p in pre_sales_qs if p['start_date'] < now]
+        default_id = max(past, key=lambda p: p['start_date'])['id'] if past else None
+    return [
+        {'id': p['id'], 'name': p['name'], 'is_default': p['id'] == default_id}
+        for p in pre_sales_qs
+    ]
 
 
 class PreSaleViewSet(viewsets.ModelViewSet):
@@ -73,12 +90,21 @@ class AvailableSlotViewSet(viewsets.ModelViewSet):
     permission_classes = [permissions.AllowAny]
 
     def get_serializer_class(self):
-        if self.action in ('retrieve', 'list'):  # 👈
+        if self.action in ('retrieve', 'list'):
             return AvailableSlotDetailSerializer
         return AvailableSlotSerializer
 
     def get_queryset(self):
-        queryset = AvailableSlot.objects.filter(is_active=True)
+        from django.db.models import OuterRef, Subquery, IntegerField, Value, Sum
+        from django.db.models.functions import Coalesce
+        reserved_subquery = IndividualCup.objects.filter(
+            pre_sale=OuterRef('pre_sale'),
+            partner_university__quota_type=OuterRef('quota_type'),
+            is_active=True,
+        ).values('pre_sale').annotate(total=Sum('currency')).values('total')
+        queryset = AvailableSlot.objects.filter(is_active=True).annotate(
+            reserved=Coalesce(Subquery(reserved_subquery, output_field=IntegerField()), Value(0))
+        )
         pre_sale_id = self.request.query_params.get('pre_sale_id')
         quota_type_id = self.request.query_params.get('quota_type_id')
         if pre_sale_id:
@@ -86,6 +112,113 @@ class AvailableSlotViewSet(viewsets.ModelViewSet):
         if quota_type_id:
             queryset = queryset.filter(quota_type_id=quota_type_id)
         return queryset
+
+    def update(self, request, *args, **kwargs):
+        from django.db.models import Sum
+        instance = self.get_object()
+        new_amount = request.data.get('amount')
+
+        if new_amount is not None:
+            try:
+                new_amount = int(new_amount)
+            except (ValueError, TypeError):
+                return Response(
+                    {'amount': 'Debe ser un número entero.'},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+            total_reserved = IndividualCup.objects.filter(
+                pre_sale=instance.pre_sale,
+                partner_university__quota_type=instance.quota_type,
+                is_active=True,
+            ).aggregate(total=Sum('currency'))['total'] or 0
+
+            if new_amount < total_reserved:
+                return Response(
+                    {'amount': f'La cantidad no puede ser menor a los cupos ya reservados por universidades ({total_reserved}).'},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+
+            used_total = Registration.objects.filter(
+                pre_sale=instance.pre_sale,
+                quota_type=instance.quota_type,
+                is_active=True,
+            ).count()
+
+            if new_amount < used_total:
+                return Response(
+                    {'amount': f'La cantidad no puede ser menor al total de participantes ya inscritos ({used_total}).'},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+
+            reserved_codes = list(
+                IndividualCup.objects.filter(
+                    pre_sale=instance.pre_sale,
+                    partner_university__quota_type=instance.quota_type,
+                    is_active=True,
+                ).values_list('partner_university__code', flat=True)
+            )
+            used_reserved = Participant.objects.filter(
+                cod_university__in=reserved_codes,
+                is_active=True,
+            ).count() if reserved_codes else 0
+
+            free_slots = new_amount - total_reserved
+            non_reserved_enrollees = used_total - used_reserved
+            if free_slots < non_reserved_enrollees:
+                return Response(
+                    {'amount': f'Los cupos libres resultantes ({free_slots}) no alcanzan para los inscritos fuera de reserva ({non_reserved_enrollees}).'},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+
+        return super().update(request, *args, **kwargs)
+
+    def list(self, request, *args, **kwargs):
+        from collections import defaultdict
+        queryset = self.filter_queryset(self.get_queryset())
+        serializer = self.get_serializer(queryset, many=True)
+        data = list(serializer.data)
+
+        pre_sale_ids = {slot.pre_sale_id for slot in queryset}
+
+        # used_total: inscritos por (pre_sale, quota_type)
+        reg_counts = (
+            Registration.objects.filter(pre_sale_id__in=pre_sale_ids, is_active=True)
+            .values('pre_sale_id', 'quota_type_id')
+            .annotate(count=Count('id'))
+        )
+        used_total_map = {(r['pre_sale_id'], r['quota_type_id']): r['count'] for r in reg_counts}
+
+        # used_reserved: participantes de universidades con IndividualCup para ese (pre_sale, quota_type)
+        cups = IndividualCup.objects.filter(
+            pre_sale_id__in=pre_sale_ids,
+            is_active=True,
+        ).values('pre_sale_id', 'partner_university__quota_type_id', 'partner_university__code')
+
+        code_to_keys = defaultdict(list)
+        for cup in cups:
+            key = (cup['pre_sale_id'], cup['partner_university__quota_type_id'])
+            code_to_keys[cup['partner_university__code']].append(key)
+
+        used_reserved_map = defaultdict(int)
+        if code_to_keys:
+            participant_counts = (
+                Participant.objects.filter(cod_university__in=code_to_keys.keys(), is_active=True)
+                .values('cod_university')
+                .annotate(count=Count('id'))
+            )
+            for pc in participant_counts:
+                for key in code_to_keys[pc['cod_university']]:
+                    used_reserved_map[key] += pc['count']
+
+        for item, slot in zip(data, queryset):
+            key = (slot.pre_sale_id, slot.quota_type_id)
+            item['used_total'] = used_total_map.get(key, 0)
+            item['used_reserved'] = used_reserved_map.get(key, 0)
+
+        return Response({
+            'pre_sales': get_pre_sales_with_default(),
+            'results': data,
+        })
 
 
 class RegistrationViewSet(viewsets.ModelViewSet):
@@ -601,6 +734,284 @@ class InscriptionView(APIView):
             'participant_id': participant.id,
         }, status=status.HTTP_201_CREATED)
     
+class IndividualCupViewSet(viewsets.ModelViewSet):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get_serializer_class(self):
+        if self.action in ('retrieve', 'list'):
+            return IndividualCupDetailSerializer
+        return IndividualCupSerializer
+
+    def create(self, request, *args, **kwargs):
+        from django.db.models import Sum
+        currency = request.data.get('currency')
+        partner_university_id = request.data.get('partner_university')
+        pre_sale_id = request.data.get('pre_sale')
+
+        if currency is not None and partner_university_id and pre_sale_id:
+            if IndividualCup.objects.filter(
+                pre_sale_id=pre_sale_id,
+                partner_university_id=partner_university_id,
+                is_active=True,
+            ).exists():
+                return Response(
+                    {'partner_university': 'Esta universidad ya tiene cupos asignados en esta preventa.'},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+
+            try:
+                currency = int(currency)
+            except (ValueError, TypeError):
+                return Response(
+                    {'currency': 'Debe ser un número entero.'},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+
+            try:
+                university = PartnerUniversity.objects.select_related('quota_type').get(
+                    pk=partner_university_id, is_active=True
+                )
+            except PartnerUniversity.DoesNotExist:
+                return Response(
+                    {'partner_university': 'Universidad no encontrada.'},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+
+            used = Participant.objects.filter(
+                cod_university=university.code,
+                is_active=True,
+            ).count()
+
+            if currency < used:
+                return Response(
+                    {'currency': f'La cantidad no puede ser menor a los participantes ya inscritos de esta universidad ({used}).'},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+
+            others_reserved = IndividualCup.objects.filter(
+                pre_sale_id=pre_sale_id,
+                partner_university__quota_type=university.quota_type,
+                is_active=True,
+            ).aggregate(total=Sum('currency'))['total'] or 0
+
+            slot_amount = AvailableSlot.objects.filter(
+                pre_sale_id=pre_sale_id,
+                quota_type=university.quota_type,
+                is_active=True,
+            ).values_list('amount', flat=True).first() or 0
+
+            if others_reserved + currency > slot_amount:
+                return Response(
+                    {'currency': f'La suma de cupos reservados ({others_reserved + currency}) supera el total de cupos disponibles para esta categoría ({slot_amount}).'},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+
+            used_total = Registration.objects.filter(
+                pre_sale_id=pre_sale_id,
+                quota_type=university.quota_type,
+                is_active=True,
+            ).count()
+
+            reserved_codes = list(
+                IndividualCup.objects.filter(
+                    pre_sale_id=pre_sale_id,
+                    partner_university__quota_type=university.quota_type,
+                    is_active=True,
+                ).values_list('partner_university__code', flat=True)
+            )
+            used_reserved = Participant.objects.filter(
+                cod_university__in=reserved_codes,
+                is_active=True,
+            ).count() if reserved_codes else 0
+
+            free_slots = slot_amount - (others_reserved + currency)
+            non_reserved_enrollees = used_total - used_reserved
+            if free_slots < non_reserved_enrollees:
+                return Response(
+                    {'currency': f'Los cupos directos resultantes ({free_slots}) no alcanzan para los inscritos directos ({non_reserved_enrollees}).'},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+
+        return super().create(request, *args, **kwargs)
+
+    def update(self, request, *args, **kwargs):
+        instance = self.get_object()
+        new_currency = request.data.get('currency')
+
+        if new_currency is not None:
+            try:
+                new_currency = int(new_currency)
+            except (ValueError, TypeError):
+                return Response(
+                    {'currency': 'Debe ser un número entero.'},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+
+            used = Participant.objects.filter(
+                cod_university=instance.partner_university.code,
+                is_active=True,
+            ).count()
+
+            if new_currency < used:
+                return Response(
+                    {'currency': f'La cantidad no puede ser menor a los participantes ya inscritos de esta universidad ({used}).'},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+
+            from django.db.models import Sum
+            quota_type = instance.partner_university.quota_type
+
+            others_reserved = IndividualCup.objects.filter(
+                pre_sale=instance.pre_sale,
+                partner_university__quota_type=quota_type,
+                is_active=True,
+            ).exclude(pk=instance.pk).aggregate(total=Sum('currency'))['total'] or 0
+
+            slot_amount = AvailableSlot.objects.filter(
+                pre_sale=instance.pre_sale,
+                quota_type=quota_type,
+                is_active=True,
+            ).values_list('amount', flat=True).first() or 0
+
+            if others_reserved + new_currency > slot_amount:
+                return Response(
+                    {'currency': f'La suma de cupos reservados ({others_reserved + new_currency}) supera el total de cupos disponibles para esta categoría ({slot_amount}).'},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+
+            used_total = Registration.objects.filter(
+                pre_sale=instance.pre_sale,
+                quota_type=quota_type,
+                is_active=True,
+            ).count()
+
+            reserved_codes = list(
+                IndividualCup.objects.filter(
+                    pre_sale=instance.pre_sale,
+                    partner_university__quota_type=quota_type,
+                    is_active=True,
+                ).values_list('partner_university__code', flat=True)
+            )
+            used_reserved = Participant.objects.filter(
+                cod_university__in=reserved_codes,
+                is_active=True,
+            ).count() if reserved_codes else 0
+
+            free_slots = slot_amount - (others_reserved + new_currency)
+            non_reserved_enrollees = used_total - used_reserved
+            if free_slots < non_reserved_enrollees:
+                return Response(
+                    {'currency': f'Los cupos directos resultantes ({free_slots}) no alcanzan para los inscritos directos ({non_reserved_enrollees}).'},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+
+        return super().update(request, *args, **kwargs)
+
+    def get_queryset(self):
+        from django.db.models import Q
+        queryset = IndividualCup.objects.filter(is_active=True).select_related(
+            'pre_sale', 'partner_university__quota_type'
+        )
+        pre_sale_id = self.request.query_params.get('pre_sale_id')
+        partner_university_id = self.request.query_params.get('partner_university_id')
+        quota_type_id = self.request.query_params.get('quota_type_id')
+        search = self.request.query_params.get('search', '').strip()
+        if pre_sale_id:
+            queryset = queryset.filter(pre_sale_id=pre_sale_id)
+        if partner_university_id:
+            queryset = queryset.filter(partner_university_id=partner_university_id)
+        if quota_type_id:
+            queryset = queryset.filter(partner_university__quota_type_id=quota_type_id)
+        if search:
+            queryset = queryset.filter(
+                Q(partner_university__name__icontains=search) |
+                Q(partner_university__abbreviation__icontains=search) |
+                Q(partner_university__code__icontains=search)
+            )
+        return queryset
+
+    def list(self, request, *args, **kwargs):
+        queryset = self.filter_queryset(self.get_queryset())
+        serializer = self.get_serializer(queryset, many=True)
+        data = list(serializer.data)
+
+        # Pares (pre_sale_id, quota_type_id) presentes en el resultado
+        slot_keys = {(cup.pre_sale_id, cup.partner_university.quota_type_id) for cup in queryset}
+        pre_sale_ids = {k[0] for k in slot_keys}
+
+        # used: inscritos por universidad
+        codes = [cup.partner_university.code for cup in queryset]
+        participant_counts = (
+            Participant.objects.filter(cod_university__in=codes, is_active=True)
+            .values('cod_university')
+            .annotate(count=Count('id'))
+        )
+        used_map = {pc['cod_university']: pc['count'] for pc in participant_counts}
+
+        # total_amount: cupos totales del slot correspondiente
+        slots = (
+            AvailableSlot.objects.filter(
+                pre_sale_id__in=pre_sale_ids,
+                is_active=True,
+            ).values('pre_sale_id', 'quota_type_id', 'amount')
+        )
+        amount_map = {(s['pre_sale_id'], s['quota_type_id']): s['amount'] for s in slots}
+
+        # used_total: inscritos totales por (pre_sale, quota_type)
+        reg_counts = (
+            Registration.objects.filter(pre_sale_id__in=pre_sale_ids, is_active=True)
+            .values('pre_sale_id', 'quota_type_id')
+            .annotate(count=Count('id'))
+        )
+        used_total_map = {(r['pre_sale_id'], r['quota_type_id']): r['count'] for r in reg_counts}
+
+        for item, cup in zip(data, queryset):
+            slot_key = (cup.pre_sale_id, cup.partner_university.quota_type_id)
+            item['used'] = used_map.get(cup.partner_university.code, 0)
+            item['total_amount'] = amount_map.get(slot_key, 0)
+            item['used_total'] = used_total_map.get(slot_key, 0)
+
+        quota_types = list(
+            QuotaType.objects.filter(is_active=True)
+            .exclude(name='General')
+            .values('id', 'name')
+        )
+
+        # universities: selector para formulario de creación/edición
+        pre_sale_id = request.query_params.get('pre_sale_id')
+        quota_type_id = request.query_params.get('quota_type_id')
+
+        general_id = QuotaType.objects.filter(name='General', is_active=True).values_list('id', flat=True).first()
+        universities_qs = PartnerUniversity.objects.filter(is_active=True).exclude(quota_type_id=general_id)
+
+        if quota_type_id:
+            universities_qs = universities_qs.filter(quota_type_id=quota_type_id)
+
+        if pre_sale_id:
+            already_assigned = IndividualCup.objects.filter(
+                pre_sale_id=pre_sale_id,
+                is_active=True,
+            ).values_list('partner_university_id', flat=True)
+            universities_qs = universities_qs.exclude(id__in=already_assigned)
+
+        universities = [
+            {
+                'id': u['id'],
+                'name': u['name'],
+                'abbreviation': u['abbreviation'],
+                'quota_type': u['quota_type_id'],
+            }
+            for u in universities_qs.values('id', 'name', 'abbreviation', 'quota_type_id')
+        ]
+
+        return Response({
+            'pre_sales': get_pre_sales_with_default(),
+            'quota_types': quota_types,
+            'universities': universities,
+            'results': data,
+        })
+
+
 SLOT_ORDER = ['Internacional', 'Nacional', 'General']
 
 class AvailableSlotsRealTimeView(APIView):

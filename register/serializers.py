@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from .models import PreSale, QuotaType, AvailableSlot, Registration, Transaction, Refund, DynamicCode
+from .models import PreSale, QuotaType, AvailableSlot, Registration, Transaction, Refund, DynamicCode, IndividualCup
 
 
 class PreSaleSerializer(serializers.ModelSerializer):
@@ -48,10 +48,14 @@ class AvailableSlotSerializer(serializers.ModelSerializer):
 class AvailableSlotDetailSerializer(serializers.ModelSerializer):
     pre_sale = PreSaleSerializer(read_only=True)
     quota_type = QuotaTypeSerializer(read_only=True)
+    reserved = serializers.SerializerMethodField()
 
     class Meta:
         model = AvailableSlot
         fields = '__all__'
+
+    def get_reserved(self, obj):
+        return getattr(obj, 'reserved', 0)
 
 
 class RefundSerializer(serializers.ModelSerializer):
@@ -161,3 +165,22 @@ class DynamicCodeDetailSerializer(serializers.ModelSerializer):
     class Meta:
         model = DynamicCode
         fields = '__all__'
+
+
+class IndividualCupSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = IndividualCup
+        fields = '__all__'
+
+
+class IndividualCupDetailSerializer(serializers.ModelSerializer):
+    pre_sale = PreSaleSerializer(read_only=True)
+    partner_university = serializers.SerializerMethodField()
+
+    class Meta:
+        model = IndividualCup
+        fields = '__all__'
+
+    def get_partner_university(self, obj):
+        from participant.serializers import PartnerUniversitySerializer
+        return PartnerUniversitySerializer(obj.partner_university).data

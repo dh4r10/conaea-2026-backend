@@ -10,6 +10,7 @@ from .views import (
     TransactionViewSet,
     RefundViewSet,
     DynamicCodeViewSet,
+    IndividualCupViewSet,
     VerifyCodeView,
     InscriptionView,
     AvailableSlotsRealTimeView,
@@ -24,6 +25,7 @@ router.register('registration', RegistrationViewSet, basename='registration')
 router.register('transaction', TransactionViewSet, basename='transaction')
 router.register('refund', RefundViewSet, basename='refund')
 router.register('dynamic-code', DynamicCodeViewSet, basename='dynamic_code')
+router.register('individual-cup', IndividualCupViewSet, basename='individual_cup')
 
 urlpatterns = [
     path('register/', include(router.urls)),
