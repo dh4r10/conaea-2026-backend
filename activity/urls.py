@@ -5,6 +5,7 @@ from .views import (
     DayViewSet,
     SpeakerViewSet,
     ActivityViewSet,
+    ScheduleView,
 )
 
 router = routers.DefaultRouter()
@@ -16,4 +17,5 @@ router.register('activity', ActivityViewSet, basename='activity')
 
 urlpatterns = [
     path('activities/', include(router.urls)),
+    path('schedule/', ScheduleView.as_view(), name='schedule'),
 ]

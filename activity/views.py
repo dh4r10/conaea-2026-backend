@@ -1,4 +1,4 @@
-from rest_framework import viewsets, permissions, status
+from rest_framework import viewsets, permissions, status, generics
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from .models import ActivityType, Day, Speaker, Activity
@@ -9,6 +9,7 @@ from .serializers import (
     SpeakerSerializer,
     ActivitySerializer,
     ActivityDetailSerializer,
+    ScheduleSerializer,
 )
 
 
@@ -106,3 +107,9 @@ class ActivityViewSet(viewsets.ModelViewSet):
         if speaker_id:
             queryset = queryset.filter(speaker_id=speaker_id)
         return queryset
+
+
+class ScheduleView(generics.ListAPIView):
+    queryset = Day.objects.filter(is_active=True).order_by('date')
+    serializer_class = ScheduleSerializer
+    permission_classes = [permissions.AllowAny]
