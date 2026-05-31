@@ -604,6 +604,97 @@ class ParticipantTableView(APIView):
         return response
 
 
+class ParticipantProfileView(APIView):
+    permission_classes = [permissions.AllowAny]
+
+    def get(self, request, participant_id):
+        try:
+            participant = Participant.objects.select_related(
+                'registration__quota_type',
+                'registration__pre_sale',
+            ).prefetch_related('enrollment_set').get(pk=participant_id, is_active=True)
+        except Participant.DoesNotExist:
+            return Response(
+                {'error': 'Participante no encontrado'},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        registration = participant.registration
+        quota_type = registration.quota_type
+
+        university_name = ''
+        if participant.university_type == 'Referido':
+            try:
+                university_name = PartnerUniversity.objects.get(
+                    code=participant.cod_university, is_active=True
+                ).name
+            except PartnerUniversity.DoesNotExist:
+                pass
+
+        try:
+            slot = AvailableSlot.objects.get(
+                pre_sale=registration.pre_sale,
+                quota_type=quota_type,
+                is_active=True,
+            )
+            mount = slot.mount
+        except AvailableSlot.DoesNotExist:
+            mount = None
+
+        conditions = {
+            psc.special_condition_id: psc.description or ''
+            for psc in ParticipantSpecialCondition.objects.filter(
+                participant=participant,
+                is_active=True,
+            )
+        }
+
+        transactions_qs = registration.transaction_set.filter(is_active=True).order_by('created_at')
+        validated_transaction_ids = set(
+            Validation.objects.filter(
+                model='transaction',
+                register_id__in=transactions_qs.values_list('id', flat=True),
+            ).values_list('register_id', flat=True)
+        )
+
+        transactions = [
+            {
+                'id': t.id,
+                'payment_method': t.payment_method,
+                'mount': str(mount) if mount is not None else None,
+                'voucher': t.voucher.url if t.voucher else None,
+                'created_at': t.created_at.isoformat(),
+                'is_validated': t.id in validated_transaction_ids,
+            }
+            for t in transactions_qs
+        ]
+
+        return Response({
+            'participant_id': participant.id,
+            'registration_id': registration.id,
+            'full_name': f"{participant.first_name} {participant.paternal_surname} {participant.maternal_surname}",
+            'email': participant.email,
+            'cellphone': participant.cellphone,
+            'document_type': participant.document_type,
+            'identity_document': participant.identity_document,
+            'birthdate': participant.birthday.isoformat() if participant.birthday else None,
+            'university': university_name,
+            'university_type': participant.university_type,
+            'quota_type': quota_type.name,
+            'currency': quota_type.currency,
+            'mount': str(mount) if mount is not None else None,
+            'academic_cycle': participant.academic_cycle or '',
+            'discapacidad': conditions.get(1, ''),
+            'alergia': conditions.get(2, ''),
+            'photograph': participant.photograph.url if participant.photograph else None,
+            'archive': next(
+                (e.archive.url for e in participant.enrollment_set.all() if e.is_active and e.archive),
+                None,
+            ),
+            'transactions': transactions,
+        }, status=status.HTTP_200_OK)
+
+
 class RequestOTPView(APIView):
     permission_classes = [permissions.AllowAny]
 

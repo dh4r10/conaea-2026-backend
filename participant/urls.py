@@ -4,6 +4,7 @@ from .views import (
     ParticipantStatsView,
     ParticipantTableView,
     ParticipantUpdateView,
+    ParticipantProfileView,
     SpecialConditionViewSet,
     ParticipantViewSet,
     ParticipantSpecialConditionViewSet,
@@ -34,4 +35,5 @@ urlpatterns = [
     path('participants/table/', ParticipantTableView.as_view(), name='participant-table'),
     path('participants/stats/', ParticipantStatsView.as_view(), name='participant_stats'),
     path('participants/participant/<int:pk>/update/', ParticipantUpdateView.as_view(), name='participant_update'),
+    path('participants/<int:participant_id>/profile/', ParticipantProfileView.as_view(), name='participant_profile'),
 ]
